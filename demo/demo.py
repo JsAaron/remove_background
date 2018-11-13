@@ -5,8 +5,9 @@ import util
 import colorsys
 import sys
 import os
+from colorthief import ColorThief
 
-imageURl = getImagePath("legao/6.jpg")
+imageURl = getImagePath("legao/1.jpg")
 
 
 
@@ -56,33 +57,14 @@ def chromaKey(im,minPixel,maxPixel):
     return im
 
 
-# 获取主要颜色
-def get_dominant_color(image):
-    count,r,g,b = image.getcolors()
-    print(count)
-    # max_score = 0.0001
-    # dominant_color = None
-    # for count,(r,g,b) in image.getcolors(image.size[0]*image.size[1]):
-    #     # 转为HSV标准
-    #     saturation = colorsys.rgb_to_hsv(r/255.0, g/255.0, b/255.0)[1]
-    #     y = min(abs(r*2104+g*4130+b*802+4096+131072)>>13,235)
-    #     y = (y-16.0)/(235-16)
-    #     #忽略高亮色
-    #     if y > 0.9:
-    #         continue
-    #     score = (saturation+0.1)*count
-    #     if score > max_score:
-    #         max_score = score
-    #         dominant_color = (r,g,b)
-    # return dominant_color
+
 
 if __name__ == '__main__':
     image = cutFigure(imageURl)
     minPixel,maxPixel=get_color_range(image)
     chromaImage = chromaKey(image,minPixel,maxPixel)
     name, ext = os.path.splitext(imageURl)
-    # chromaImage.save(name + '.png')
-    get_dominant_color(chromaImage)
-
-    # newIm = Image.new("RGB", (640, 480), mainColor)
-    # chromaImage.show()
+    color_thief = ColorThief(imageURl)
+    dominant_color = color_thief.get_color(quality=1)
+    newIm = Image.new("RGB", (640, 480), dominant_color)
+    newIm.show()
