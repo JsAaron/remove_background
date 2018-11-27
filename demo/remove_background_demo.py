@@ -1,8 +1,14 @@
 import os
+from os import path   
 from PIL import Image
-from colorthief import ColorThief
+
+d = path.dirname(__file__) 
+rootPath = os.path.dirname(d)
+
+
 
 # 模式
+
 # 1 只切图
 # 2 切图后，去掉背景色
 mode=2
@@ -12,10 +18,10 @@ mode=2
 cutHeight=700
 
 # 需要处理的图片目录
-original_dir = "d:/project/git/remove_background/images/original/"
+original_dir = os.path.join(rootPath,"images/original/")
 
 # 处理后的目录位置
-new_dir = "d:/project/git/remove_background/images/new/"
+new_dir = os.path.join(rootPath,"images/new/")
 
 
 
@@ -120,7 +126,7 @@ def remove_background(image_list):
 
 
 if __name__ == '__main__':
-    # mode=1 只切图
+    # # mode=1 只切图
     image_list = cycleFigure( eachFile(original_dir))
     #  去背景色
     if mode==2:
