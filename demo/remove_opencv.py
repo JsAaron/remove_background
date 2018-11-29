@@ -11,7 +11,7 @@ def get_image(path):
     img = cv2.imread(path)
     h,w = img.shape[:2]
     # 左上角坐标(700:1500)，右下角坐标(0:w）的图像。
-    img = img[650:1600, 0:w]
+    img = img[500:1800, 0:w]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return img,gray
 
@@ -52,16 +52,23 @@ def image_morphology(thresh):
 # cv2.RETR_LIST,                 #检测的轮廓不建立等级关系
 # cv2.RETR_TREE,                 #建立一个等级树结构的轮廓
 # cv2.CHAIN_APPROX_NONE,         #存储所有的轮廓点，相邻的两个点的像素位置差不超过1
-def findcnts_and_box_point(closed):
+def findcnts_and_box_point(closed,original_img):
     # 这里opencv3返回的是三个参数
-    (_, cnts, _) = cv2.findContours(
-        closed.copy(),
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE)
+    (img, contours, hierarchy) = cv2.findContours(closed.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    h, w, _ = original_img.shape
+    c_max = 0
+    for i in range(len(contours)):
+        cnt = contours[i]
+        area = cv2.contourArea(cnt)
+        M = cv2.moments(cnt)
+        cx = int(M['m10']/M['m00'])
+        cy = int(M['m01']/M['m00'])
+        if cx<w/3 and area>100000:
+           c_max=i
+           print(i)
 
-    c = sorted(cnts, key=cv2.contourArea, reverse=True)[0]
     # 计算最大轮廓的旋转包围盒
-    rect = cv2.minAreaRect(c)
+    rect = cv2.minAreaRect(contours[c_max])
     box = np.int0(cv2.boxPoints(rect))
     return box
 
@@ -80,13 +87,14 @@ def drawcnts_and_cut(original_img, box):
     crop_img = original_img[y1:y1+hight, x1:x1+width]
     return draw_img, crop_img
 
+
 def walk(originalPath,newPath):
     original_img, gray = get_image(originalPath)
     blurred = Gaussian_Blur(gray)
     gradX, gradY, gradient = Sobel_gradient(blurred)
     thresh = Thresh_and_blur(gradient)
     closed = image_morphology(thresh)
-    box = findcnts_and_box_point(closed)
+    box = findcnts_and_box_point(closed,original_img)
     draw_img, crop_img = drawcnts_and_cut(original_img,box)
     cv2.imwrite(newPath, draw_img)
 
