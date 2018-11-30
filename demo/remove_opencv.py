@@ -2,16 +2,34 @@
 import cv2
 import numpy as np
 import os
+import random
 from os import path   
 from PIL import Image
 
+# 截图的Y坐标
+# 左上角坐标(600 到 1800)像素点的高度
+topY = 600
+bottomY = 1800
+
+# # 需要处理的图片目录
+original_dir = "d:/project/git/remove_background/images/test/"
+
+# # 处理后的目录位置
+new_dir = "d:/project/git/remove_background/images/new/"
+
+
+def showImage(img):
+    num = str(random.random())
+    cv2.namedWindow(num, cv2.WINDOW_NORMAL)
+    cv2.imshow(num,img)
+    return 
 
  #获取图片
 def get_image(path):      
     img = cv2.imread(path)
     h,w = img.shape[:2]
     # 左上角坐标(700:1500)，右下角坐标(0:w）的图像。
-    img = img[500:1800, 0:w]
+    img = img[760:1800, 0:w]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return img,gray
 
@@ -32,7 +50,7 @@ def Sobel_gradient(blurred):
 
 
 # 阈值
-def Thresh_and_blur(gradient):  #设定阈值
+def set_thresh(gradient):  #设定阈值
     blurred = cv2.GaussianBlur(gradient, (9, 9),0)
     (_, thresh) = cv2.threshold(gradient, 10, 255, cv2.THRESH_BINARY)
     return thresh
@@ -55,20 +73,9 @@ def image_morphology(thresh):
 def findcnts_and_box_point(closed,original_img):
     # 这里opencv3返回的是三个参数
     (img, contours, hierarchy) = cv2.findContours(closed.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-    h, w, _ = original_img.shape
-    c_max = 0
-    for i in range(len(contours)):
-        cnt = contours[i]
-        area = cv2.contourArea(cnt)
-        M = cv2.moments(cnt)
-        cx = int(M['m10']/M['m00'])
-        cy = int(M['m01']/M['m00'])
-        if cx<w/3 and area>100000:
-           c_max=i
-           print(i)
-
+    c = sorted(contours, key=cv2.contourArea, reverse=True)
     # 计算最大轮廓的旋转包围盒
-    rect = cv2.minAreaRect(contours[c_max])
+    rect = cv2.minAreaRect(c[0])
     box = np.int0(cv2.boxPoints(rect))
     return box
 
@@ -88,15 +95,63 @@ def drawcnts_and_cut(original_img, box):
     return draw_img, crop_img
 
 
+def rgb_to_hsv(r, g, b):
+    r, g, b = r/255.0, g/255.0, b/255.0
+    maxc = max(r, g, b)
+    minc = min(r, g, b)
+    v = maxc
+    if minc == maxc:
+        return 0.0, 0.0, v
+    s = (maxc-minc) / maxc
+    rc = (maxc-r) / (maxc-minc)
+    gc = (maxc-g) / (maxc-minc)
+    bc = (maxc-b) / (maxc-minc)
+    if r == maxc:
+        h = bc-gc
+    elif g == maxc:
+        h = 2.0+rc-bc
+    else:
+        h = 4.0+gc-rc
+    h = (h/6.0) % 1.0
+    return h, s, v
+
+
+min_range = (16, 15, 10)
+man_range = (77, 78, 76)
+
+# 去背景色
+def remove_background(newImage):
+		if len(newImage):
+				HSV = cv2.cvtColor(newImage, cv2.COLOR_BGR2HSV)
+				Lower = np.array([60, 0, 0])#要识别颜色的下限
+				Upper = np.array([100, 255, 255])#要识别的颜色的上限
+				#mask是把HSV图片中在颜色范围内的区域变成白色，其他区域变成黑色
+				mask = cv2.inRange(HSV, Lower, Upper)
+
+
+				# rgbaImage = cv2.cvtColor(newImage, cv2.COLOR_RGB2RGBA)
+				# width, height = rgbaImage.shape[:2]
+				# for x in range(width):
+				# 	for y in range(height):
+				# 		b,g,r,a = rgbaImage[x,y]
+				# 		min_b, min_g, min_r = min_range
+				# 		max_b, max_g, max_r = man_range
+				# 		if min_b <= b <= max_b and min_g <= g <= max_g  and min_r <= r <= max_r:
+				# 			rgbaImage[x,y]=[0,0,0,0]	
+				return mask
+		else:			
+				return newImage
+
 def walk(originalPath,newPath):
     original_img, gray = get_image(originalPath)
     blurred = Gaussian_Blur(gray)
     gradX, gradY, gradient = Sobel_gradient(blurred)
-    thresh = Thresh_and_blur(gradient)
+    thresh = set_thresh(gradient)
     closed = image_morphology(thresh)
     box = findcnts_and_box_point(closed,original_img)
     draw_img, crop_img = drawcnts_and_cut(original_img,box)
-    cv2.imwrite(newPath, draw_img)
+    rgbaImage = remove_background(crop_img)
+    cv2.imwrite(newPath, rgbaImage)
 
 
 # 遍历指定目录，显示目录下的所有文件名
@@ -118,16 +173,10 @@ def cycleFigure(original_dir,new_dir):
         walk(originalPath,newPath)
 
 
-#根目录
-rootPath = os.path.dirname(path.dirname(__file__))
 
 # ==================执行入口=======================
 
-# 需要处理的图片目录
-original_dir = os.path.join(rootPath,"images/original/")
-
-# 处理后的目录位置
-new_dir = os.path.join(rootPath,"images/new/")
-
-# 开始处理
+# # 开始处理
 cycleFigure(original_dir,new_dir)
+
+cv2.waitKey(0)
