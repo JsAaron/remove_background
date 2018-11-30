@@ -150,8 +150,8 @@ def walk(originalPath,newPath):
     closed = image_morphology(thresh)
     box = findcnts_and_box_point(closed,original_img)
     draw_img, crop_img = drawcnts_and_cut(original_img,box)
-    rgbaImage = remove_background(crop_img)
-    cv2.imwrite(newPath, rgbaImage)
+    # rgbaImage = remove_background(crop_img)
+    cv2.imwrite(newPath, crop_img)
 
 
 # 遍历指定目录，显示目录下的所有文件名
