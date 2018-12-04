@@ -11,14 +11,14 @@ isDebug = 1
 
 # 截图的Y坐标
 # 左上角坐标(600 到 1800)像素点的高度
-topY = 800
+topY = 700
 bottomY = 1800
 
 # 临时目录
 temp_dir = path.dirname(__file__) + "/temp"
 
 # # 需要处理的图片目录
-original_dir = path.dirname(__file__) + "/original"
+original_dir = path.dirname(__file__) + "/original-2"
 
 # # 处理后的目录位置
 target_dir = path.dirname(__file__) + "/target"
@@ -135,7 +135,7 @@ def preprocess_image(img_file, out_name):
     if img is None:
         return img_file, False
     # 图片缩小
-    img_small = resize_to_resolution(img, 2048)
+    img_small = resize_to_resolution(img, 1024)
     cv2.imwrite(out_name, img_small)
     return img_file, True
 
@@ -220,8 +220,9 @@ def create_default_mask(img_file, mask_dst_file):
     # DIST_MASK_5       = 5, //!< mask=5
     # DIST_MASK_PRECISE = 0  //!< mask=0
     distances = cv2.distanceTransform(edges, cv2.DIST_L2, 5)
-    bg_mask = cv2.threshold(distances, 25, 255,
+    bg_mask = cv2.threshold(distances, 60, 255,
                             cv2.THRESH_BINARY)[1].astype(np.uint8)
+
     cv2.normalize(distances, distances, 255, 0, cv2.NORM_MINMAX)
 
     # if debug_images:
@@ -346,28 +347,34 @@ def segment_images(pool, data_dir, image_files):
 ##########################
 
 
-def get_parts_dir_name(img_file):
+# 新文件路径
+def get_target_dir_name(img_file):
     data_dir = get_data_dir(img_file)
-    parts_dir = get_specified_dir(data_dir, "r_parts")
+    parts_dir = get_specified_dir(target_dir, "")
     dir_name = os.path.splitext(os.path.split(img_file)[1])[0]
     return os.path.join(parts_dir, dir_name)
 
 
+# 切割部件
 def split_parts_for_image(img_file, out_dir):
     try:
 
-        if os.path.exists(out_dir):
-            clear_directory(out_dir)
-        else:
-            create_dir(out_dir)
+        # if os.path.exists(out_dir):
+        #     clear_directory(out_dir)
+        # else:
+        #     create_dir(out_dir)
 
+        # 第三步图片
         segmented_img = cv2.imread(get_seg_file_name(img_file))
+
         width = segmented_img.shape[1]
         height = segmented_img.shape[0]
 
+        #定义区域
         min_area = 10
         max_area = width * height / 2
 
+        # BGR=>灰度图
         mask = cv2.cvtColor((segmented_img != 0).astype(np.uint8),
                             cv2.COLOR_BGR2GRAY)
 
@@ -420,10 +427,11 @@ def split_parts_for_image(img_file, out_dir):
 
             if found_mask is not None:
                 title = os.path.splitext(os.path.split(img_file)[1])[0]
-                part_file = os.path.join(out_dir,
-                                         "%s_%02d.png" % (title, part_index))
-                cv2.imwrite(part_file, found_image)
-                part_index += 1
+                part_file = os.path.join(out_dir,"%s_%02d.png" % (title, part_index))
+                # print(out_dir,part_file)
+                cv2.imwrite(out_dir+".png", found_image)
+
+            part_index += 1
 
         return img_file, True
     except Exception as _:
@@ -431,18 +439,18 @@ def split_parts_for_image(img_file, out_dir):
 
 
 def split_parts(pool, data_dir, image_files):
-    create_specified_dir(data_dir, "r_parts")
+    # create_specified_dir(data_dir, "r_parts")
+    create_specified_dir(target_dir, "")
     futures = []
-
     for img_file in image_files:
-        parts_dir = get_parts_dir_name(img_file)
+        parts_dir = get_target_dir_name(img_file)
         futures.append(
             pool.apply_async(split_parts_for_image, (img_file, parts_dir)))
 
     for future in futures:
         name, success = future.get()
-        print("parts split: %s" %
-              name if success else "failed to split parts: %s" % name)
+        # print("parts split: %s" %
+        #       name if success else "failed to split parts: %s" % name)
 
 
 ##########################
@@ -472,7 +480,6 @@ def cycleFigure():
 def prepare():
     # 创建处理临时目录
     create_specified_dir(original_dir, temp_dir)
-    create_specified_dir(target_dir,"")
 
     # 切割图,返回新的文件目录
     new_original_dir = cycleFigure()
