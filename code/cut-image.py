@@ -6,22 +6,25 @@ import numpy as np
 import random
 from multiprocessing import Pool
 
-#debug模式
+# debug模式
 isDebug = 1
+
+# cut图缩放比例
+resize = 1024
 
 # 截图的Y坐标
 # 左上角坐标(600 到 1800)像素点的高度
-topY = 700
+topY = 800
 bottomY = 1800
 
 # 临时目录
 temp_dir = path.dirname(__file__) + "/temp"
 
 # # 需要处理的图片目录
-original_dir = path.dirname(__file__) + "/original-2"
+original_dir = path.dirname(__file__) + "/original-3"
 
 # # 处理后的目录位置
-target_dir = path.dirname(__file__) + "/target"
+target_dir = path.dirname(__file__) + "/temp/target"
 
 #################
 # 工具函数
@@ -135,7 +138,7 @@ def preprocess_image(img_file, out_name):
     if img is None:
         return img_file, False
     # 图片缩小
-    img_small = resize_to_resolution(img, 1024)
+    img_small = resize_to_resolution(img, resize)
     cv2.imwrite(out_name, img_small)
     return img_file, True
 
@@ -282,7 +285,7 @@ def generate_default_masks(pool, temp_dir, cut_image_files):
 
     for future in futures:
         name = future.get()
-        print("default mask: %s" % name)
+        print("创建masks: %s" % name)
 
 
 ##########################
@@ -297,29 +300,43 @@ def get_seg_file_name(img_file):
     return os.path.join(seg_dir, png_name)
 
 
+# 首先用矩形将要选择的前景区域选定，其中前景区域应该完全包含在矩形框当中。
+# 然后算法进行迭代式分割，知道达到效果最佳。但是有时分割结果不好，
+# 例如前景当成背景，背景当成前景。测试需要用户修改。
+# 用户只需要在非前景区域用鼠标划一下即可。
 def create_segmentation(img_file, seg_file):
     try:
-        img = cv2.imread(get_preprocess_img_name(img_file))
-
-        # loading mask
+        cut_img = cv2.imread(get_preprocess_img_name(img_file))
         mask_img = cv2.imread(get_mask_file_name(img_file))
-
-        # converting to grayscale
         mask_img = cv2.cvtColor(mask_img, cv2.COLOR_BGR2GRAY)
 
-        mask = np.ones(img.shape[:2], np.uint8) * cv2.GC_PR_FGD
+        # 快速创建图，并且可能是前景
+        # cv::GC_BGD  == 0//表示是背景
+        # cv::GC_FGD  == 1//表示是前景
+        #  cv::GC_PR_BGD  == 2//表示可能是背景
+        # cv::GC_PR_FGD  == 3//表示可能是前景
+        mask = np.ones(cut_img.shape[:2], np.uint8) * cv2.GC_PR_FGD
+
         mask[mask_img == 0] = cv2.GC_BGD
         mask[mask_img == 255] = cv2.GC_FGD
 
         bgdModel = np.zeros((1, 65), np.float64)
         fgdModel = np.zeros((1, 65), np.float64)
-        cv2.grabCut(img, mask, None, bgdModel, fgdModel, 5,
+
+        # mask ：蒙版图像，指定哪些区域是背景，前景或可能的背景/前景等.它是由下面的标志，
+        # cv2.GC_BGD，cv2.GC_FGD，cv2.GC_PR_BGD，cv2.GC_PR_FGD，或简单地将0，1，2，3传递给图像。
+        # bdgModel, fgdModel ：算法内部使用的数组,只需要创建两个大小为（1,65）的np.float64类型的0数组
+        # iterCount ：算法运行的迭代次数.
+        # mode ：cv2.GC_INIT_WITH_RECT或cv2.GC_INIT_WITH_MASK，或者组合起来决定我们是画矩形还是最后的触点.
+        cv2.grabCut(cut_img, mask, None, bgdModel, fgdModel, 5,
                     cv2.GC_INIT_WITH_MASK)
 
+        # #0和2做背景
         mask2 = np.where((mask == 2) | (mask == 0), 0, 1).astype('uint8')
-        segmented = img * mask2[:, :, np.newaxis]
+        # 使用蒙板来获取前景区域
+        segmented = cut_img * mask2[:, :, np.newaxis]
 
-        # saving segmentation
+        # # saving segmentation
         cv2.imwrite(seg_file, segmented)
         return img_file, True
 
@@ -338,8 +355,7 @@ def segment_images(pool, data_dir, image_files):
 
     for future in futures:
         name, success = future.get()
-        print("segmented: %s" % name if success else "failed to segment: %s" %
-              name)
+        print("提取前景: %s" % name if success else "failed to segment: %s" % name)
 
 
 ##########################
@@ -348,21 +364,15 @@ def segment_images(pool, data_dir, image_files):
 
 
 # 新文件路径
-def get_target_dir_name(img_file):
-    data_dir = get_data_dir(img_file)
-    parts_dir = get_specified_dir(target_dir, "")
+def get_out_dir_name(img_file):
+    out_dir = get_specified_dir(target_dir, "")
     dir_name = os.path.splitext(os.path.split(img_file)[1])[0]
-    return os.path.join(parts_dir, dir_name)
+    return out_dir, dir_name
 
 
 # 切割部件
-def split_parts_for_image(img_file, out_dir):
+def split_parts_for_image(img_file, out_dir, dir_name):
     try:
-
-        # if os.path.exists(out_dir):
-        #     clear_directory(out_dir)
-        # else:
-        #     create_dir(out_dir)
 
         # 第三步图片
         segmented_img = cv2.imread(get_seg_file_name(img_file))
@@ -378,7 +388,8 @@ def split_parts_for_image(img_file, out_dir):
         mask = cv2.cvtColor((segmented_img != 0).astype(np.uint8),
                             cv2.COLOR_BGR2GRAY)
 
-        part_index = 0
+        # 部件图
+        partImages = []
 
         while True:
             nz = np.nonzero(mask.flatten())[0].flatten()
@@ -426,11 +437,26 @@ def split_parts_for_image(img_file, out_dir):
                     break
 
             if found_mask is not None:
-                title = os.path.splitext(os.path.split(img_file)[1])[0]
-                part_file = os.path.join(out_dir,"%s_%02d.png" % (title, part_index))
-                # print(out_dir,part_file)
-                cv2.imwrite(out_dir+".png", found_image)
+                partImages.append(found_image)
 
+        # 如果有多个零件，创建目录保存
+        hasmorepart = len(partImages) > 1
+        if hasmorepart:
+            out_dir = get_specified_dir(out_dir, dir_name)
+            if os.path.exists(out_dir):
+                clear_directory(out_dir)
+            else:
+                create_dir(out_dir)
+
+        part_index = 0
+        for part in partImages:
+            title = os.path.splitext(os.path.split(img_file)[1])[0]
+            if hasmorepart:
+                out_file = os.path.join(out_dir,"%s_%02d.png" % (title, part_index))
+            else:
+                out_file = os.path.join(out_dir,"%s.png" % (title))
+
+            cv2.imwrite(out_file, part)
             part_index += 1
 
         return img_file, True
@@ -439,18 +465,17 @@ def split_parts_for_image(img_file, out_dir):
 
 
 def split_parts(pool, data_dir, image_files):
-    # create_specified_dir(data_dir, "r_parts")
     create_specified_dir(target_dir, "")
     futures = []
     for img_file in image_files:
-        parts_dir = get_target_dir_name(img_file)
+        out_dir, dir_name = get_out_dir_name(img_file)
         futures.append(
-            pool.apply_async(split_parts_for_image, (img_file, parts_dir)))
+            pool.apply_async(split_parts_for_image,
+                             (img_file, out_dir, dir_name)))
 
     for future in futures:
         name, success = future.get()
-        # print("parts split: %s" %
-        #       name if success else "failed to split parts: %s" % name)
+        print("分割成功: %s" % name if success else "分割失败: %s" % name)
 
 
 ##########################
@@ -488,9 +513,9 @@ def prepare():
     print("需要处理的图片数:%d" % len(cut_image_files))
 
     pool = Pool(4)
-    preprocess_images(pool, temp_dir, cut_image_files)
-    generate_default_masks(pool, temp_dir, cut_image_files)
-    segment_images(pool, temp_dir, cut_image_files)
+    # preprocess_images(pool, temp_dir, cut_image_files)
+    # generate_default_masks(pool, temp_dir, cut_image_files)
+    # segment_images(pool, temp_dir, cut_image_files)
     split_parts(pool, temp_dir, cut_image_files)
 
 
