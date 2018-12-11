@@ -6,23 +6,29 @@ import numpy as np
 import random
 from multiprocessing import Pool
 
+import tkinter as tk
+from PIL import Image, ImageTk
+
+
 # debug模式
-isDebug = 1
+isDebug = 0
 
 # cut图缩放比例
 resize = 1024
 
 # 截图的Y坐标
 # 左上角坐标(600 到 1800)像素点的高度
-topY = 800
-bottomY = 1800
+topY = 100
+bottomY = 1900
 
 # # 需要处理的图片目录
-original_dir = path.dirname(__file__) + "/original"
+original_dir = os.path.dirname(os.path.realpath(__file__)) + "/original-4"
 
 # # 处理后的目录位置
-target_dir = path.dirname(__file__) + "/target"
+target_dir = os.path.dirname(os.path.realpath(__file__)) + "/target"
 
+# 临时目录
+temp_dir = os.path.dirname(os.path.realpath(__file__)) + "/temp"
 
 #################
 # 工具函数
@@ -53,7 +59,7 @@ def create_specified_dir(data_dir, dir_name):
 # 创建目录
 def create_dir(d):
     if not os.path.exists(d):
-        print("creating dir: %s" % d)
+        # print("creating dir: %s" % d)
         os.mkdir(d)
         if not os.path.exists(d):
             raise Exception("Failed to create dir: %s" % d)
@@ -106,8 +112,7 @@ def get_image_names_from_dir(data_dir):
     return image_files
 
 
-# 临时目录
-temp_dir = get_specified_dir(original_dir, "temp")
+
 
 #################
 # 处理第一步
@@ -157,10 +162,10 @@ def preprocess_images(pool, temp_dir, cut_image_files):
 
     for future in futures:
         name, success = future.get()
-        if success:
-            print("预处理: %s" % name)
-        else:
-            print("fail: %s" % name)
+        # if success:
+            # print("预处理: %s" % name)
+        # else:
+            # print("预处理失败: %s" % name)
 
 
 ##########################
@@ -195,13 +200,13 @@ def create_default_mask(img_file, mask_dst_file):
         blur = cv2.GaussianBlur(img, (3, 3), 0)
         # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
         # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
-        edges = cv2.Canny(blur, 50, 100)
+        edges = cv2.Canny(blur, 127, 255)
         acc += edges
 
     # 数组的数值被平移或缩放到一个指定的范围，线性归一化
     cv2.normalize(acc, acc, 255, 0, cv2.NORM_MINMAX)
     # 阈值处理
-    acc = cv2.threshold(acc, 15, 255, cv2.THRESH_BINARY)[1]
+    acc = cv2.threshold(acc, 30, 255, cv2.THRESH_BINARY)[1]
 
     if isDebug:
         edge_file = os.path.join(mask_dir, mask_title + "_edge.png")
@@ -286,7 +291,7 @@ def generate_default_masks(pool, temp_dir, cut_image_files):
 
     for future in futures:
         name = future.get()
-        print("创建masks: %s" % name)
+        # print("创建masks: %s" % name)
 
 
 ##########################
@@ -356,7 +361,7 @@ def segment_images(pool, data_dir, image_files):
 
     for future in futures:
         name, success = future.get()
-        print("提取前景: %s" % name if success else "failed to segment: %s" % name)
+        # print("提取前景: %s" % name if success else "failed to segment: %s" % name)
 
 
 ##########################
@@ -431,6 +436,7 @@ def split_parts_for_image(img_file, out_dir, dir_name):
                     newY = (y * 4) + topY
                     newW = w * 4
                     newH = h * 4
+                    # print(w,h)
                     # print(newY+topY,newY+newH+topY)
                     # print(newY, newY + newH, newX, newX + newW)
                     # found_image = original_img[1008:1200, 1764:1876].copy()
@@ -473,12 +479,14 @@ def split_parts_for_image(img_file, out_dir, dir_name):
             else:
                 out_file = os.path.join(out_dir, "%s.png" % (title))
 
+            
             cv2.imwrite(out_file, part)
             part_index += 1
 
         return dir_name + ".png", True
     except Exception as _:
         return dir_name + ".png", False
+
 
 
 def split_parts(pool, data_dir, cut_image_files):
@@ -492,7 +500,7 @@ def split_parts(pool, data_dir, cut_image_files):
 
     for future in futures:
         name, success = future.get()
-        print("分割成功: %s" % name if success else "分割失败: %s" % name)
+        # print("分割成功: %s" % name if success else "分割失败: %s" % name)
 
 
 ##########################
@@ -534,10 +542,17 @@ def prepare():
     print("图片数:%d" % len(cut_image_files))
 
     pool = Pool(4)
+    print("预处理...")
     preprocess_images(pool, temp_dir, cut_image_files)
+    print("生成mask图...")
     generate_default_masks(pool, temp_dir, cut_image_files)
+    print("分离前景与背景...")
     segment_images(pool, temp_dir, cut_image_files)
+    print("切图...")
     split_parts(pool, temp_dir, cut_image_files)
+    print("完成")
+
+
 
 
 if __name__ == "__main__":
