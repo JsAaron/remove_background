@@ -1,7 +1,0 @@
-project: background-removal
-runtime: python3-keras:2018.03
-
-services:
-  - name: default
-    function: background_removal.predict
-    cors_allow_origins: "*"
