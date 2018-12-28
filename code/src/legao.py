@@ -8,7 +8,7 @@ from multiprocessing import Pool
 import tkinter as tk
 from PIL import Image, ImageTk
 import json 
-
+import shutil
 
 # debug模式
 isDebug = 0
@@ -18,11 +18,11 @@ resize = 1024
 
 # 截图的Y坐标
 # 左上角坐标(600 到 1800)像素点的高度
-topY = 100
+topY = 350
 bottomY = 1900
 
 # # 需要处理的图片目录
-original_dir = os.path.dirname(os.path.realpath(__file__)) + "/original-1"
+original_dir = os.path.dirname(os.path.realpath(__file__)) + "/test"
 
 # # 处理后的目录位置
 target_dir = os.path.dirname(os.path.realpath(__file__)) + "/target"
@@ -497,7 +497,6 @@ def split_parts_for_image(img_file, out_dir, dir_name):
         return dir_name + ".png", False
 
 
-
 def split_parts(pool, data_dir, cut_image_files):
     create_specified_dir(target_dir, "")
     futures = []
@@ -510,6 +509,65 @@ def split_parts(pool, data_dir, cut_image_files):
     for future in futures:
         name, success = future.get()
         # print("分割成功: %s" % name if success else "分割失败: %s" % name)
+
+
+##########################
+#  有效图
+##########################
+
+# 通过图片的原地址，转化成新的目录+png
+def get_valid_file_name(img_file):
+    data_dir = get_data_dir(img_file)
+    masks_dir = get_specified_dir(data_dir, "r_vaild")
+    png_name = get_png_name_for_jpeg(img_file)
+    return os.path.join(masks_dir, png_name) ,png_name
+
+
+# 有效图处理
+def create_default_valid(img_file, valid_dist_file,name):
+    image = cutImage(img_file)
+    img_small = resize_to_resolution(image, 1024)
+    small_h, w = img_small.shape[:2]
+    im = cv2.GaussianBlur(img_small, (3,3), 0)
+    gray = cv2.cvtColor(im,cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray,*(15,40))
+    edges = cv2.dilate(edges, None)
+    edges = cv2.erode(edges, None)
+    (_, thresh) = cv2.threshold(edges, 100 ,255, cv2.THRESH_BINARY)
+    cimg, cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if len(cnts) < 1:
+        return
+
+    contours = []
+    for cnt in cnts:   
+        x,y,w,h=cv2.boundingRect(cnt)
+        if(h==small_h):
+            contours.append(cnts)
+
+    if(len(contours)>1):
+        # cv2.imwrite(valid_dist_file, image)
+        shutil.copy(img_file,valid_dist_file)
+        # cv2.drawContours(img_small, contours[0], -1, (0, 0, 255), 3)
+        # cv2.imshow("1",img_small)
+        # cv2.waitKey(0)
+
+
+def generate_valid_images(pool, temp_dir,cut_image_files):
+    # 创建目录
+    create_specified_dir(temp_dir, "r_vaild")
+    futures = []
+
+    for img_file in cut_image_files:
+        # 转化目录到指定的r_masks，改名为png
+        valid_file ,name= get_valid_file_name(img_file)
+        # if not os.path.exists(valid_file):
+        futures.append(
+            pool.apply_async(create_default_valid, (img_file, valid_file,name)))
+
+    for future in futures:
+        name = future.get()
+
 
 
 ##########################
@@ -538,29 +596,35 @@ def cycleFigure():
 
 def prepare():
     # 创建处理临时目录
-    if os.path.exists(temp_dir):
-        clear_directory(temp_dir)
-    if os.path.exists(target_dir):
-        clear_directory(target_dir)
+    # if os.path.exists(temp_dir):
+    #     clear_directory(temp_dir)
+    # if os.path.exists(target_dir):
+    #     clear_directory(target_dir)
 
-    create_specified_dir(original_dir, temp_dir)
+    # create_specified_dir(original_dir, temp_dir)
 
     # 切割图,返回新的文件目录
-    new_original_dir = cycleFigure()
+    # new_original_dir = cycleFigure()
+    new_original_dir = create_specified_dir(temp_dir, "r_cut")
 
     cut_image_files = get_image_names_from_dir(new_original_dir)
     print("图片数:%d" % len(cut_image_files))
 
     pool = Pool(4)
-    print("预处理...")
-    preprocess_images(pool, temp_dir, cut_image_files)
-    print("生成mask图...")
-    generate_default_masks(pool, temp_dir, cut_image_files)
-    print("分离前景与背景...")
-    segment_images(pool, temp_dir, cut_image_files)
-    print("切图...")
-    split_parts(pool, temp_dir, cut_image_files)
-    print("完成")
+
+    # 有效图
+    generate_valid_images(pool,temp_dir,cut_image_files)
+
+
+    # print("预处理...")
+    # preprocess_images(pool, temp_dir, cut_image_files)
+    # print("生成mask图...")
+    # generate_default_masks(pool, temp_dir, cut_image_files)
+    # print("分离前景与背景...")
+    # segment_images(pool, temp_dir, cut_image_files)
+    # print("切图...")
+    # split_parts(pool, temp_dir, cut_image_files)
+    # print("完成")
 
 
 
