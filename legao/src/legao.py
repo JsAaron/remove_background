@@ -7,13 +7,15 @@ import random
 from multiprocessing import Pool
 import tkinter as tk
 from PIL import Image, ImageTk
-import json 
+import json
 import shutil
+import copy
 
 from colorthief import ColorThief
 from config import config
-from util import create_dir,create_specified_dir,get_specified_dir
-
+from util import create_dir,create_specified_dir,get_specified_dir,\
+                 asscess_dir,clear_dir,get_image_names_from_dir,clipImage
+from preprocess import preprocessImage
 
 # debug模式
 isDebug = 0
@@ -26,8 +28,7 @@ resize = 1024
 topY = 350
 bottomY = 1900
 
-
-d = path.dirname(__file__)  #返回当前文件所在的目录 
+d = path.dirname(__file__)  #返回当前文件所在的目录
 
 # # 需要处理的图片目录
 original_dir = os.path.dirname(os.path.realpath(__file__)) + "/test"
@@ -41,14 +42,6 @@ temp_dir = os.path.dirname(os.path.realpath(__file__)) + "/target/temp"
 #################
 # 工具函数
 #################
-
-
-#获取文件名
-def get_file_name(img_file):
-    return os.path.split(img_file)[1]
-
-
-
 
 
 # 获取文件的父目录
@@ -71,87 +64,15 @@ def showImage(img):
     cv2.destroyAllWindows()
 
 
-# 清理目录
-def clear_directory(dir_name):
-    files = os.listdir(dir_name)
-    for file_name in files:
-        path_to_remove = os.path.join(dir_name, file_name)
-        if os.path.isdir(path_to_remove):
-            clear_directory(path_to_remove)
-            os.rmdir(path_to_remove)
-        else:
-            os.remove(path_to_remove)
-
-
 def shrink_mask(mask, kernel_size, n_iter=1):
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
     return cv2.erode(mask, kernel, iterations=n_iter)
 
 
-# 获取所有图片名
-def get_image_names_from_dir(data_dir):
-    _files = os.listdir(data_dir)
-    image_files = []
-    for f in _files:
-        if f.lower().endswith('.jpg'):
-            image_files.append(os.path.join(data_dir, f))
-    return image_files
-
-
-
-
-#################
-# 处理第一步
-#################
-
-
-# 等比缩放
-def resize_to_resolution(im, preproces_size):
-    if max(im.shape[0], im.shape[1]) > preproces_size:
-        if im.shape[0] > im.shape[1]:
-            dsize = ((preproces_size * im.shape[1]) // im.shape[0],
-                     preproces_size)
-        else:
-            dsize = (preproces_size,
-                     (preproces_size * im.shape[0]) // im.shape[1])
-        im = cv2.resize(im, dsize, interpolation=cv2.INTER_AREA)
-    return im
-
-
 # 找到preprocess目录下的图片
 def get_preprocess_img_name(img_file):
-    ds_dir = os.path.join(get_data_dir(img_file), "r_preprocess")
+    ds_dir = os.path.join(get_data_dir(img_file), "1_preprocess")
     return os.path.join(ds_dir, get_png_name_for_jpeg(img_file))
-
-
-# 输入图片
-def preprocess_image(img_file, out_name):
-    img = cv2.imread(img_file)
-    if img is None:
-        return img_file, False
-    # 图片缩小
-    img_small = resize_to_resolution(img, resize)
-    cv2.imwrite(out_name, img_small)
-    return img_file, True
-
-
-# 预处理图片
-def preprocess_images(pool, temp_dir, cut_image_files):
-    create_specified_dir(temp_dir, "r_preprocess")
-    futures = []
-    # 检测文件存在，如果存在就不做处理
-    for img_file in cut_image_files:
-        preprocess_file = get_preprocess_img_name(img_file)
-        # if not os.path.exists(preprocess_file):
-        futures.append(
-            pool.apply_async(preprocess_image, (img_file, preprocess_file)))
-
-    for future in futures:
-        name, success = future.get()
-        # if success:
-            # print("预处理: %s" % name)
-        # else:
-            # print("预处理失败: %s" % name)
 
 
 ##########################
@@ -162,19 +83,20 @@ def preprocess_images(pool, temp_dir, cut_image_files):
 # 通过图片的原地址，转化成新的目录+png
 def get_mask_file_name(img_file):
     data_dir = get_data_dir(img_file)
-    masks_dir = get_specified_dir(data_dir, "r_masks")
+    masks_dir = get_specified_dir(data_dir, "2_masks")
     png_name = get_png_name_for_jpeg(img_file)
     return os.path.join(masks_dir, png_name)
 
 
 # img_file 原图
 # mask_dst_file 保存目标图
-def create_default_mask(img_file, mask_dst_file):
-    mask_dir, mask_filename = os.path.split(mask_dst_file)
+# preproces_path, mask_path
+def create_default_mask(preproces_path, mask_path):
+    mask_dir, mask_filename = os.path.split(mask_path)
     # 目录文件名 =》xxx.png =>xxx
     mask_title = os.path.splitext(mask_filename)[0]
     # 找到downsampled 第一步处理的图片
-    rgb = cv2.imread(get_preprocess_img_name(img_file))
+    rgb = cv2.imread(get_preprocess_img_name(preproces_path))
     split = cv2.split(rgb)
     # Bule ，返回来一个给定形状和类型的用0填充的数组
     acc = np.zeros(split[0].shape, dtype=np.float32)
@@ -257,27 +179,27 @@ def create_default_mask(img_file, mask_dst_file):
 
     bg_image = rgb.copy()
     bg_image[bg_mask != 0] = 0
-    cv2.imwrite(mask_dst_file, bg_image)
+    cv2.imwrite(mask_path, bg_image)
 
-    return img_file
+    return preproces_path
 
 
 # 生成mask图
-def generate_default_masks(pool, temp_dir, cut_image_files):
-    # 创建目录
-    create_specified_dir(temp_dir, "r_masks")
-    futures = []
+def generate_default_masks(pool, preproces_dir, temp_dir):
+    mask_dir = create_specified_dir(temp_dir, "2_masks")
+    preproces_files = get_image_names_from_dir(preproces_dir, 'png')
 
-    for img_file in cut_image_files:
-        # 转化目录到指定的r_masks，改名为png
-        mask_file = get_mask_file_name(img_file)
-        # if not os.path.exists(mask_file):
+    # 创建目录
+    futures = []
+    for preproces_path in preproces_files:
+        mask_path = get_mask_file_name(preproces_path)
         futures.append(
-            pool.apply_async(create_default_mask, (img_file, mask_file)))
+            pool.apply_async(create_default_mask, (preproces_path, mask_path)))
 
     for future in futures:
-        name = future.get()
-        # print("创建masks: %s" % name)
+        future.get()
+
+    return mask_dir
 
 
 ##########################
@@ -287,7 +209,7 @@ def generate_default_masks(pool, temp_dir, cut_image_files):
 
 def get_seg_file_name(img_file):
     data_dir = get_data_dir(img_file)
-    seg_dir = get_specified_dir(data_dir, "r_segmentation")
+    seg_dir = get_specified_dir(data_dir, "3_segmentation")
     png_name = get_png_name_for_jpeg(img_file)
     return os.path.join(seg_dir, png_name)
 
@@ -296,10 +218,11 @@ def get_seg_file_name(img_file):
 # 然后算法进行迭代式分割，知道达到效果最佳。但是有时分割结果不好，
 # 例如前景当成背景，背景当成前景。测试需要用户修改。
 # 用户只需要在非前景区域用鼠标划一下即可。
-def create_segmentation(img_file, seg_file):
+# mask_dir, seg_path
+def create_segmentation(mask_path, seg_file):
     try:
-        cut_img = cv2.imread(get_preprocess_img_name(img_file))
-        mask_img = cv2.imread(get_mask_file_name(img_file))
+        cut_img = cv2.imread(get_preprocess_img_name(mask_path))
+        mask_img = cv2.imread(get_mask_file_name(mask_path))
         mask_img = cv2.cvtColor(mask_img, cv2.COLOR_BGR2GRAY)
 
         # 快速创建图，并且可能是前景
@@ -330,24 +253,28 @@ def create_segmentation(img_file, seg_file):
 
         # # saving segmentation
         cv2.imwrite(seg_file, segmented)
-        return img_file, True
+        return mask_path, True
 
     except Exception as _:
-        return img_file, False
+        return mask_path, False
 
 
-def segment_images(pool, data_dir, image_files):
-    create_specified_dir(data_dir, "r_segmentation")
+# preproces_dir, temp_dir
+def segment_images(pool, preproces_dir, mask_dir, temp_dir):
+    seg_dir = create_specified_dir(temp_dir, "3_segmentation")
+    mask_files = get_image_names_from_dir(mask_dir, 'png')
+
     futures = []
-    for img_file in image_files:
-        seg_file = get_seg_file_name(img_file)
-        # if not os.path.exists(seg_file):
+    for mask_path in mask_files:
+        seg_path = get_seg_file_name(mask_path)
         futures.append(
-            pool.apply_async(create_segmentation, (img_file, seg_file)))
+            pool.apply_async(create_segmentation, (mask_path, seg_path)))
 
     for future in futures:
-        name, success = future.get()
+        future.get()
         # print("提取前景: %s" % name if success else "failed to segment: %s" % name)
+
+    return seg_dir
 
 
 ##########################
@@ -356,17 +283,18 @@ def segment_images(pool, data_dir, image_files):
 
 
 # 新文件路径
-def get_out_dir_name(img_file):
+def get_out_dir_name(img_file, target_dir):
     out_dir = get_specified_dir(target_dir, "")
     dir_name = os.path.splitext(os.path.split(img_file)[1])[0]
     return out_dir, dir_name
 
 
 # 切割部件
-def split_parts_for_image(img_file, out_dir, dir_name):
+def split_parts_for_image(preproces_path, out_dir, dir_name,original_dir):
     try:
+
         # 第三步图片
-        segmented_img = cv2.imread(get_seg_file_name(img_file))
+        segmented_img = cv2.imread(get_seg_file_name(preproces_path))
 
         # 原始图
         original_img = cv2.imread(
@@ -385,6 +313,8 @@ def split_parts_for_image(img_file, out_dir, dir_name):
 
         # 部件图
         partImages = []
+
+        topY = config["topY"]
 
         while True:
             nz = np.nonzero(mask.flatten())[0].flatten()
@@ -413,25 +343,15 @@ def split_parts_for_image(img_file, out_dir, dir_name):
 
                 # slicing into found rect
                 roi_mask = ff_mask[y + 1:y + 1 + h, x + 1:x + 1 + w]
-
                 found = False
+
                 if min_area < area < max_area:
                     found_mask = roi_mask
-                    # print(x,y)
                     newX = x * 4
                     newY = (y * 4) + topY
                     newW = w * 4
                     newH = h * 4
-                    # print(w,h)
-                    # print(newY+topY,newY+newH+topY)
-                    # print(newY, newY + newH, newX, newX + newW)
-                    # found_image = original_img[1008:1200, 1764:1876].copy()
-                    # found_image = segmented_img[y:y + h, x:x + w].copy()
-                    found_image = original_img[newY:newY + newH, newX:newX +
-                                               newW].copy()
-                    # showImage(found_image)
-                    # found_image[roi_mask == 0] = 0  # removing background
-                    # showImage(found_image)
+                    found_image = original_img[newY:newY + newH, newX:newX +newW].copy()
                     found = True
 
                 # clearing found component in the mask
@@ -451,30 +371,38 @@ def split_parts_for_image(img_file, out_dir, dir_name):
         # hasmorepart = len(partImages) > 1
         # if hasmorepart:
         out_dir = get_specified_dir(out_dir, dir_name)
+
         if os.path.exists(out_dir):
-            clear_directory(out_dir)
+            clear_dir(out_dir)
         else:
             create_dir(out_dir)
 
         part_index = 0
         for part in partImages:
-            title = os.path.splitext(os.path.split(img_file)[1])[0]
-            file_name = os.path.join("","%s_%02d.png" % (title, part_index))
+            title = os.path.splitext(os.path.split(preproces_path)[1])[0]
+            file_name = os.path.join("", "%s_%02d.png" % (title, part_index))
             # if hasmorepart:
-            out_file = os.path.join(out_dir,"%s_%02d.png" % (title, part_index))
+            out_file = os.path.join(out_dir,
+                                    "%s_%02d.png" % (title, part_index))
             # else:
             #     out_file = os.path.join(out_dir, "%s.png" % (title))
             cv2.imwrite(out_file, part)
             color_thief = ColorThief(out_file)
             dominant_color = color_thief.get_color(quality=1)
             h, w = part.shape[:2]
-            datas = {"name":file_name,"w":w,"h":h,"area":w*h,"colour":dominant_color}
-            filePath = out_dir+"/data.json"
-            if(os.path.exists(filePath)):
-                fl=open(filePath, 'a')
+            datas = {
+                "name": file_name,
+                "w": w,
+                "h": h,
+                "area": w * h,
+                "colour": dominant_color
+            }
+            filePath = out_dir + "/data.json"
+            if (os.path.exists(filePath)):
+                fl = open(filePath, 'a')
             else:
-                fl=open(filePath, 'w')
-            fl.write(json.dumps(datas,ensure_ascii=False,indent=2))
+                fl = open(filePath, 'w')
+            fl.write(json.dumps(datas, ensure_ascii=False, indent=2))
             fl.close()
             part_index += 1
 
@@ -483,109 +411,45 @@ def split_parts_for_image(img_file, out_dir, dir_name):
         return dir_name + ".png", False
 
 
-def split_parts(pool, data_dir, cut_image_files):
-    create_specified_dir(target_dir, "")
+def split_parts(pool, preproces_dir, target_dir,original_dir):
+    preproces_files = get_image_names_from_dir(preproces_dir, 'png')
     futures = []
-    for img_file in cut_image_files:
-        out_dir, dir_name = get_out_dir_name(img_file)
+    for preproces_path in preproces_files:
+        out_dir, dir_name = get_out_dir_name(preproces_path, target_dir)
         futures.append(
             pool.apply_async(split_parts_for_image,
-                             (img_file, out_dir, dir_name)))
+                             (preproces_path, out_dir, dir_name,original_dir)))
 
     for future in futures:
         name, success = future.get()
-        # print("分割成功: %s" % name if success else "分割失败: %s" % name)
+        print("分割成功: %s" % name if success else "分割失败: %s" % name)
 
 
-##########################
-#  有效图
-##########################
-
-# 通过图片的原地址，转化成新的目录+png
-def get_valid_file_name(img_file):
-    data_dir = get_data_dir(img_file)
-    masks_dir = get_specified_dir(data_dir, "r_vaild")
-    png_name = get_png_name_for_jpeg(img_file)
-    return os.path.join(masks_dir, png_name) ,png_name
+#每次处理数量
+baseCount = 10
 
 
-# 有效图处理
-def create_default_valid(img_file, valid_dist_file,name):
-    image = cutImage(img_file)
-    img_small = resize_to_resolution(image, 1024)
-    small_h, w = img_small.shape[:2]
-    im = cv2.GaussianBlur(img_small, (3,3), 0)
-    gray = cv2.cvtColor(im,cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray,*(15,40))
-    edges = cv2.dilate(edges, None)
-    edges = cv2.erode(edges, None)
-    (_, thresh) = cv2.threshold(edges, 100 ,255, cv2.THRESH_BINARY)
-    cimg, cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if len(cnts) < 1:
-        return
-
-    contours = []
-    for cnt in cnts:   
-        x,y,w,h=cv2.boundingRect(cnt)
-        if(h==small_h):
-            contours.append(cnts)
-
-    if(len(contours)>1):
-        # cv2.imwrite(valid_dist_file, image)
-        shutil.copy(img_file,valid_dist_file)
-        # cv2.drawContours(img_small, contours[0], -1, (0, 0, 255), 3)
-        # cv2.imshow("1",img_small)
-        # cv2.waitKey(0)
+def pool_image():
+    return
 
 
-def generate_valid_images(pool, temp_dir,cut_image_files):
-    # 创建目录
-    create_specified_dir(temp_dir, "r_vaild")
+def pocess_image(startCount, pool, image_files):
     futures = []
+    interval = baseCount
 
-    for img_file in cut_image_files:
-        # 转化目录到指定的r_masks，改名为png
-        valid_file ,name= get_valid_file_name(img_file)
-        # if not os.path.exists(valid_file):
-        futures.append(
-            pool.apply_async(create_default_valid, (img_file, valid_file,name)))
+    # 如果总数低于间隔数
+    if len(image_files) < baseCount:
+        interval = len(image_files)
 
-    for future in futures:
-        name = future.get()
+    # 从0开始
+    endCount = startCount + interval - 1
 
+    for index, value in enumerate(image_files):
+        if index >= startCount and index <= endCount:
+            img = image_files[index]
+            futures.append(img)
 
-
-##########################
-#  切割主体
-##########################
-
-
-#获取图片
-def cutImage(path):
-    img = cv2.imread(path)
-    h, w = img.shape[:2]
-    img = img[topY:bottomY, 0:w]
-    return img
-
-
-# 切割图片
-def cycleFigure():
-    new_dir = create_specified_dir(temp_dir, "r_cut")  # 新目录
-    image_files = get_image_names_from_dir(original_dir)
-    for item in image_files:
-        image = cutImage(item)
-        new_file_name = get_specified_dir(new_dir, get_file_name(item))
-        cv2.imwrite(new_file_name, image)
-    return new_dir
-
-
-#  target目录
-def dir_process(target_dir):
-    if os.path.exists(target_dir):
-        clear_directory(target_dir)
-    else:
-        create_specified_dir(target_dir,"")
+    return futures
 
 
 def prepare():
@@ -594,34 +458,27 @@ def prepare():
     target_dir = config["target_dir"]
 
     # 根目录处理
-    dir_process(target_dir)
+    asscess_dir(target_dir)
+    asscess_dir(temp_dir)
 
-    # 切割图,返回新的文件目录
-    # new_original_dir = cycleFigure()
-    # new_original_dir = create_specified_dir(temp_dir, "r_cut")
+    pool = Pool(4)
+    image_total_files = get_image_names_from_dir(original_dir, 'jpg')
 
-    # cut_image_files = get_image_names_from_dir(new_original_dir)
-    # print("图片数:%d" % len(cut_image_files))
+    # 图片分段
+    futures = pocess_image(0, pool, image_total_files)
 
-    # pool = Pool(4)
+    # 预处理
+    preproces_dir = preprocessImage(pool, futures, temp_dir)
 
-    # # 有效图
-    # generate_valid_images(pool,temp_dir,cut_image_files)
+    # #生成mask图
+    mask_dir = generate_default_masks(pool, preproces_dir, temp_dir)
 
+    #分离前景与背景
+    seg_dir = segment_images(pool, preproces_dir, mask_dir, temp_dir)
 
-    # print("预处理...")
-    # preprocess_images(pool, temp_dir, cut_image_files)
-    # print("生成mask图...")
-    # generate_default_masks(pool, temp_dir, cut_image_files)
-    # print("分离前景与背景...")
-    # segment_images(pool, temp_dir, cut_image_files)
-    # print("切图...")
-    # split_parts(pool, temp_dir, cut_image_files)
-    # print("完成")
-
+    #分割部件
+    split_parts(pool, preproces_dir, target_dir, original_dir)
 
 
 if __name__ == "__main__":
     prepare()
-
-

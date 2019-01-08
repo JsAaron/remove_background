@@ -9,15 +9,14 @@ config = {
     # cut图缩放比例
     "resize": 1024,
     # 截图的Y坐标
-    # 左上角坐标(600 到 1800)像素点的高度
-    "topY": 350,
-    "bottomY": 1900,
+    # 左上角坐标(600 - 1800)像素点的高度
+    "topY": 1100,
+    "bottomY": 2000,
     "root_path":root_path,
     # # 需要处理的图片目录
     "original_dir": os.path.join(root_path,'original'),
     # # 处理后的目录位置
     "target_dir": os.path.join(root_path,'target'),
     # 临时目录
-    "temp_dir": os.path.join(root_path,'target\\temp')
+    "temp_dir": os.path.join( os.path.join(root_path,'original'), "temp")
 }
-
