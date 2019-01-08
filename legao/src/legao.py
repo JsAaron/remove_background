@@ -20,25 +20,6 @@ from preprocess import preprocessImage
 # debug模式
 isDebug = 0
 
-# cut图缩放比例
-resize = 1024
-
-# 截图的Y坐标
-# 左上角坐标(600 到 1800)像素点的高度
-topY = 350
-bottomY = 1900
-
-d = path.dirname(__file__)  #返回当前文件所在的目录
-
-# # 需要处理的图片目录
-original_dir = os.path.dirname(os.path.realpath(__file__)) + "/test"
-
-# # 处理后的目录位置
-target_dir = os.path.dirname(os.path.realpath(__file__)) + "/target"
-
-# 临时目录
-temp_dir = os.path.dirname(os.path.realpath(__file__)) + "/target/temp"
-
 #################
 # 工具函数
 #################
@@ -290,7 +271,7 @@ def get_out_dir_name(img_file, target_dir):
 
 
 # 切割部件
-def split_parts_for_image(preproces_path, out_dir, dir_name,original_dir):
+def split_parts_for_image(preproces_path, out_dir, dir_name, original_dir):
     try:
 
         # 第三步图片
@@ -351,7 +332,8 @@ def split_parts_for_image(preproces_path, out_dir, dir_name,original_dir):
                     newY = (y * 4) + topY
                     newW = w * 4
                     newH = h * 4
-                    found_image = original_img[newY:newY + newH, newX:newX +newW].copy()
+                    found_image = original_img[newY:newY + newH, newX:newX +
+                                               newW].copy()
                     found = True
 
                 # clearing found component in the mask
@@ -411,45 +393,79 @@ def split_parts_for_image(preproces_path, out_dir, dir_name,original_dir):
         return dir_name + ".png", False
 
 
-def split_parts(pool, preproces_dir, target_dir,original_dir):
+def split_parts(pool, preproces_dir, target_dir, original_dir):
     preproces_files = get_image_names_from_dir(preproces_dir, 'png')
     futures = []
     for preproces_path in preproces_files:
         out_dir, dir_name = get_out_dir_name(preproces_path, target_dir)
         futures.append(
-            pool.apply_async(split_parts_for_image,
-                             (preproces_path, out_dir, dir_name,original_dir)))
+            pool.apply_async(
+                split_parts_for_image,
+                (preproces_path, out_dir, dir_name, original_dir)))
 
     for future in futures:
         name, success = future.get()
-        print("分割成功: %s" % name if success else "分割失败: %s" % name)
+        print("处理成功: %s" % name if success else "处理失败: %s" % name)
 
 
 #每次处理数量
-baseCount = 10
+baseCount = 2
 
 
-def pool_image():
-    return
+def check_next_task():
+    print(1)
 
 
-def pocess_image(startCount, pool, image_files):
+def start_pool(futures, original_dir, temp_dir, target_dir):
+    # 开始处理
+    pool = Pool(4)
+    # 预处理
+    preproces_dir = preprocessImage(pool, futures, temp_dir)
+    # #生成mask图
+    mask_dir = generate_default_masks(pool, preproces_dir, temp_dir)
+    #分离前景与背景
+    seg_dir = segment_images(pool, preproces_dir, mask_dir, temp_dir)
+    #分割部件
+    split_parts(pool, preproces_dir, target_dir, original_dir)
+
+
+def pocess_image(startCount, image_total_files, original_dir, temp_dir,
+                 target_dir):
     futures = []
     interval = baseCount
 
+    # 退出
+    if (startCount >= len(image_total_files)):
+        print(len(image_total_files), "张图片，全部处理完毕")
+        return
+
     # 如果总数低于间隔数
-    if len(image_files) < baseCount:
-        interval = len(image_files)
+    if len(image_total_files) < baseCount:
+        interval = len(image_total_files)
 
     # 从0开始
     endCount = startCount + interval - 1
 
-    for index, value in enumerate(image_files):
+    print("===============================")
+    showEnd = endCount+1
+    if len(image_total_files)<endCount+1:
+        showEnd = endCount
+    print("共计图", len(image_total_files), "张图, 开始处理", startCount+1 , "到",
+          showEnd )
+
+    for index, value in enumerate(image_total_files):
         if index >= startCount and index <= endCount:
-            img = image_files[index]
+            img = image_total_files[index]
             futures.append(img)
 
-    return futures
+    start_pool(futures, original_dir, temp_dir, target_dir)
+
+    print("===============================")
+
+    # 检测下一个任务
+    asscess_dir(temp_dir)
+    pocess_image(endCount+1, image_total_files, original_dir, temp_dir,
+                 target_dir)
 
 
 def prepare():
@@ -461,23 +477,10 @@ def prepare():
     asscess_dir(target_dir)
     asscess_dir(temp_dir)
 
-    pool = Pool(4)
     image_total_files = get_image_names_from_dir(original_dir, 'jpg')
 
-    # 图片分段
-    futures = pocess_image(0, pool, image_total_files)
-
-    # 预处理
-    preproces_dir = preprocessImage(pool, futures, temp_dir)
-
-    # #生成mask图
-    mask_dir = generate_default_masks(pool, preproces_dir, temp_dir)
-
-    #分离前景与背景
-    seg_dir = segment_images(pool, preproces_dir, mask_dir, temp_dir)
-
-    #分割部件
-    split_parts(pool, preproces_dir, target_dir, original_dir)
+    #开始任务
+    pocess_image(0, image_total_files, original_dir, temp_dir, target_dir)
 
 
 if __name__ == "__main__":
