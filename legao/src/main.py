@@ -11,10 +11,12 @@ import json
 import shutil
 import copy
 
-from colorthief import ColorThief
+from color import ColorThief
 from config import config
 from util import create_dir,create_specified_dir,get_specified_dir,\
-                 asscess_dir,clear_dir,get_image_names_from_dir,clipImage
+                 asscess_dir,clear_dir,get_image_paths_from_dir,\
+                 get_file_path, copy_move_file, split_path, get_png_name_for_jpeg, get_jpeg_name_for_png
+
 from preprocess import preprocessImage
 
 # debug模式
@@ -28,13 +30,6 @@ isDebug = 0
 # 获取文件的父目录
 def get_data_dir(img_file):
     return os.path.split(os.path.split(img_file)[0])[0]
-
-
-# 转化文件名格式  jpg=>png
-def get_png_name_for_jpeg(img_file):
-    img_file = os.path.split(img_file)[1]
-    img_file = os.path.splitext(img_file)[0]
-    return img_file + '.png'
 
 
 def showImage(img):
@@ -168,7 +163,7 @@ def create_default_mask(preproces_path, mask_path):
 # 生成mask图
 def generate_default_masks(pool, preproces_dir, temp_dir):
     mask_dir = create_specified_dir(temp_dir, "2_masks")
-    preproces_files = get_image_names_from_dir(preproces_dir, 'png')
+    preproces_files = get_image_paths_from_dir(preproces_dir, 'png')
 
     # 创建目录
     futures = []
@@ -243,7 +238,7 @@ def create_segmentation(mask_path, seg_file):
 # preproces_dir, temp_dir
 def segment_images(pool, preproces_dir, mask_dir, temp_dir):
     seg_dir = create_specified_dir(temp_dir, "3_segmentation")
-    mask_files = get_image_names_from_dir(mask_dir, 'png')
+    mask_files = get_image_paths_from_dir(mask_dir, 'png')
 
     futures = []
     for mask_path in mask_files:
@@ -271,7 +266,7 @@ def get_out_dir_name(img_file, target_dir):
 
 
 # 切割部件
-def split_parts_for_image(preproces_path, out_dir, dir_name, original_dir):
+def split_parts_for_image(start_y,preproces_path, out_dir, dir_name, original_dir):
     try:
 
         # 第三步图片
@@ -283,7 +278,7 @@ def split_parts_for_image(preproces_path, out_dir, dir_name, original_dir):
 
         width = segmented_img.shape[1]
         height = segmented_img.shape[0]
-
+   
         #定义区域
         min_area = 10
         max_area = width * height / 2
@@ -294,8 +289,6 @@ def split_parts_for_image(preproces_path, out_dir, dir_name, original_dir):
 
         # 部件图
         partImages = []
-
-        topY = config["topY"]
 
         while True:
             nz = np.nonzero(mask.flatten())[0].flatten()
@@ -325,11 +318,11 @@ def split_parts_for_image(preproces_path, out_dir, dir_name, original_dir):
                 # slicing into found rect
                 roi_mask = ff_mask[y + 1:y + 1 + h, x + 1:x + 1 + w]
                 found = False
-
+    
                 if min_area < area < max_area:
                     found_mask = roi_mask
                     newX = x * 4
-                    newY = (y * 4) + topY
+                    newY = (y * 4) + start_y
                     newW = w * 4
                     newH = h * 4
                     found_image = original_img[newY:newY + newH, newX:newX +
@@ -377,7 +370,7 @@ def split_parts_for_image(preproces_path, out_dir, dir_name, original_dir):
                 "w": w,
                 "h": h,
                 "area": w * h,
-                "colour": dominant_color
+                "rgb": dominant_color
             }
             filePath = out_dir + "/data.json"
             if (os.path.exists(filePath)):
@@ -393,94 +386,145 @@ def split_parts_for_image(preproces_path, out_dir, dir_name, original_dir):
         return dir_name + ".png", False
 
 
-def split_parts(pool, preproces_dir, target_dir, original_dir):
-    preproces_files = get_image_names_from_dir(preproces_dir, 'png')
+def split_parts(pool, preproces_dir, target_dir, original_dir, error_dir, start_y):
+    preproces_files = get_image_paths_from_dir(preproces_dir, 'png')
     futures = []
     for preproces_path in preproces_files:
         out_dir, dir_name = get_out_dir_name(preproces_path, target_dir)
         futures.append(
             pool.apply_async(
                 split_parts_for_image,
-                (preproces_path, out_dir, dir_name, original_dir)))
+                (start_y,preproces_path, out_dir, dir_name, original_dir)))
 
     for future in futures:
         name, success = future.get()
-        print("处理成功: %s" % name if success else "处理失败: %s" % name)
+        copyName = get_jpeg_name_for_png(get_specified_dir(original_dir, name))
+        if success:
+            print("分解成功: ", copyName)
+        else:
+            distName = get_specified_dir(error_dir,
+                                         get_jpeg_name_for_png(name))
+            copy_move_file(copyName, distName)
+            print("分解失败: ", copyName)
 
 
-#每次处理数量
-baseCount = 2
-
-
-def check_next_task():
-    print(1)
-
-
-def start_pool(futures, original_dir, temp_dir, target_dir):
-    # 开始处理
+# 开始执行任务
+def exec_pool_task(start_y, end_y,futures, original_dir, temp_dir, target_dir, error_dir):
     pool = Pool(4)
     # 预处理
-    preproces_dir = preprocessImage(pool, futures, temp_dir)
+    preproces_dir = preprocessImage(pool, futures, temp_dir, start_y, end_y)
     # #生成mask图
     mask_dir = generate_default_masks(pool, preproces_dir, temp_dir)
     #分离前景与背景
     seg_dir = segment_images(pool, preproces_dir, mask_dir, temp_dir)
     #分割部件
-    split_parts(pool, preproces_dir, target_dir, original_dir)
+    split_parts(pool, preproces_dir, target_dir, original_dir, error_dir, start_y)
 
 
-def pocess_image(startCount, image_total_files, original_dir, temp_dir,
-                 target_dir):
+def exec_process_image(start_y, end_y, startCount, interval, image_total_files,
+                       original_dir, temp_dir, error_dir, target_dir):
     futures = []
-    interval = baseCount
+
+    # 图片总数量
+    total_images = len(image_total_files)
 
     # 退出
-    if (startCount >= len(image_total_files)):
-        print(len(image_total_files), "张图片，全部处理完毕")
+    if (startCount >= total_images):
+        print(total_images, "张图片，全部分解完毕", sep="")
         return
 
     # 如果总数低于间隔数
-    if len(image_total_files) < baseCount:
-        interval = len(image_total_files)
+    if total_images < interval:
+        interval = total_images
 
     # 从0开始
     endCount = startCount + interval - 1
 
     print("===============================")
-    showEnd = endCount+1
-    if len(image_total_files)<endCount+1:
-        showEnd = endCount
-    print("共计图", len(image_total_files), "张图, 开始处理", startCount+1 , "到",
-          showEnd )
+
+    #结尾处理
+    showEnd = endCount + 1
+    if total_images < endCount + 1:
+        showEnd = startCount + (total_images - startCount)
+
+    print("共计", total_images, "张图, 开始分解图", startCount + 1, "到", showEnd, sep='')
 
     for index, value in enumerate(image_total_files):
         if index >= startCount and index <= endCount:
             img = image_total_files[index]
             futures.append(img)
 
-    start_pool(futures, original_dir, temp_dir, target_dir)
+    exec_pool_task(start_y, end_y,futures, original_dir, temp_dir, target_dir, error_dir)
 
     print("===============================")
 
     # 检测下一个任务
     asscess_dir(temp_dir)
-    pocess_image(endCount+1, image_total_files, original_dir, temp_dir,
-                 target_dir)
+    exec_process_image(start_y, end_y, endCount + 1, interval,
+                       image_total_files, original_dir, temp_dir, error_dir,
+                       target_dir)
 
 
-def prepare():
-    temp_dir = config["temp_dir"]
-    original_dir = config["original_dir"]
-    target_dir = config["target_dir"]
+# 执行入口
+def legao_main(original_dir="",
+               target_dir="",
+               interval=20,
+               error_dir="",
+               start_y="",
+               end_y=""):
+
+    if original_dir == "":
+        print("必须传递原图目录 original_dir")
+        return
+
+    if target_dir == "":
+        print("必须传递保存目录 target_dir")
+        return
+
+    if start_y == "":
+        print("必须设置截图的Y轴上部距离(px) start_y")
+        return
+
+    if end_y == "":
+        print("必须设置截图的Y轴下部距离(px) end_y")
+        return
+
+    # 临时保存目录
+    temp_dir = get_specified_dir(original_dir, "temp")
+    error_dir = error_dir or get_specified_dir(original_dir, "error")
+
+    message = [
+        ["原图目录: ", original_dir],
+        ["临时目录: ", temp_dir],
+        ["错误目录: ", error_dir],
+        ["完成目录: ", target_dir],
+        ["开始Y: ", start_y],
+        ["截止Y: ", end_y],
+        ["分解量: ", interval],
+    ]
+    for name in message:
+        print(name[0], name[1], sep="")
 
     # 根目录处理
     asscess_dir(target_dir)
     asscess_dir(temp_dir)
+    asscess_dir(error_dir)
 
-    image_total_files = get_image_names_from_dir(original_dir, 'jpg')
+    original_image_total_files = get_image_paths_from_dir(original_dir, 'jpg')
 
     #开始任务
-    pocess_image(0, image_total_files, original_dir, temp_dir, target_dir)
+    exec_process_image(start_y, end_y, 0, interval, original_image_total_files,
+                       original_dir, temp_dir, error_dir, target_dir)
+
+
+def prepare():
+    legao_main(
+        original_dir=config["original_dir"],
+        target_dir=config["target_dir"],
+        error_dir=config["error_dir"],
+        start_y=config["start_y"],
+        interval=config["interval"],
+        end_y=config["end_y"])
 
 
 if __name__ == "__main__":

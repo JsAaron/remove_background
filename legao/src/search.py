@@ -1,6 +1,6 @@
 import cv2
 from util import create_dir,create_specified_dir,get_specified_dir,\
-                 asscess_dir,clear_dir,get_image_names_from_dir,clipImage,\
+                 asscess_dir,clear_dir,get_image_paths_from_dir,clipImage,\
                  get_file_name
 
 
@@ -59,7 +59,7 @@ def preprocess_image(path, target):
 def seachUsefulFigure(pool, original, target):
     print("找到原图...")
     futures = []
-    image_files = get_image_names_from_dir(original)
+    image_files = get_image_paths_from_dir(original)
     for path in image_files:
         futures.append(pool.apply_async(preprocess_image, (path, target)))
 

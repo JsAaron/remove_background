@@ -1,11 +1,13 @@
 import os
+import shutil
 from os import path
 import cv2
 from config import config
 
-# 得到指定目录
-def get_specified_dir(data_dir, dir_name):
-    return os.path.join(data_dir, dir_name)
+
+# 复制文件
+def copy_move_file(src, dist):
+    shutil.copyfile(src, dist)
 
 
 # 创建目录
@@ -40,17 +42,18 @@ def clear_dir(dir_name):
             os.remove(path_to_remove)
 
 
+
+
 #  target目录
 def asscess_dir(target_dir):
     if os.path.exists(target_dir):
         clear_dir(target_dir)
     else:
-        create_specified_dir(target_dir,"")
+        create_specified_dir(target_dir, "")
 
 
-
-# 获取所有图片名
-def get_image_names_from_dir(data_dir,type):
+# 获取图片路径
+def get_image_paths_from_dir(data_dir, type="png"):
     _files = os.listdir(data_dir)
     image_files = []
     for f in _files:
@@ -59,28 +62,34 @@ def get_image_names_from_dir(data_dir,type):
     return image_files
 
 
-#获取图片
-def clipImage(path):
-    img = cv2.imread(path)
-    h, w = img.shape[:2]
-    setH = config["bottomY"]
-    setH = h
-    img = img[config["topY"] : setH, 0:w]
-    return img
+# 得到指定目录
+def get_specified_dir(data_dir, dir_name):
+    return os.path.join(data_dir, dir_name)
 
 
 #获取文件名
-def get_file_name(img_file):
-    return os.path.split(img_file)[1]
+def get_file_name(file):
+    return os.path.split(file)[1]
 
 
+# 获取文件目录
+def get_file_path(file):
+    return os.path.split(file)[0]
 
-def get_data_dir(img_file):
-    return os.path.split(os.path.split(img_file)[0])[0]
 
+def split_path(file):
+    return os.path.split(file)
 
+def get_data_dir(file):
+    return os.path.split(os.path.split(file)[0])[0]
 
+# jpg转化png
 def get_png_name_for_jpeg(img_file):
     img_file = os.path.split(img_file)[1]
     img_file = os.path.splitext(img_file)[0]
     return img_file + '.png'
+
+
+# png转化jpg
+def get_jpeg_name_for_png(file):
+    return os.path.splitext(file)[0] + '.jpg'
