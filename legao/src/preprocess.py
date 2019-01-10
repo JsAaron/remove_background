@@ -40,7 +40,6 @@ def get_preprocess_img_name(img_file):
 #预处理 缩放图
 def preprocessImage(pool, image_files, g_conf):
     futures = []
-
     temp_dir = g_conf["temp_dir"]
     start_y = g_conf["start_y"]
     end_y = g_conf["end_y"]

@@ -13,8 +13,7 @@ def copy_move_file(src, dist):
 # 创建目录
 def create_dir(d):
     if not os.path.exists(d):
-        # print("creating dir: %s" % d)
-        os.mkdir(d)
+        os.makedirs(d)
         if not os.path.exists(d):
             raise Exception("Failed to create dir: %s" % d)
 

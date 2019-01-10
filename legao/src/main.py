@@ -87,10 +87,15 @@ def create_default_mask(preproces_path, mask_path):
         edges = cv2.Canny(blur, 127, 255)
         acc += edges
 
+    showImage(acc)
+
+
     # 数组的数值被平移或缩放到一个指定的范围，线性归一化
     cv2.normalize(acc, acc, 255, 0, cv2.NORM_MINMAX)
+
     # 阈值处理
     acc = cv2.threshold(acc, 30, 255, cv2.THRESH_BINARY)[1]
+
 
     if isDebug:
         edge_file = os.path.join(mask_dir, mask_title + "_edge.png")
@@ -459,9 +464,9 @@ def exec_pool_task(futures, g_conf):
 
     # 预处理
     preproces_dir = preprocessImage(pool, futures, g_conf)
-    # # #生成mask图
+    #生成mask图
     mask_dir = generate_default_masks(pool, preproces_dir, temp_dir)
-    # #分离前景与背景
+    #分离前景与背景
     seg_dir = segment_images(pool, preproces_dir, mask_dir, temp_dir)
     # 分割部件
     split_parts(pool, preproces_dir, g_conf)
@@ -544,18 +549,6 @@ def legao_main(original_dir="",
     temp_dir = get_specified_dir(original_dir, "temp")
     error_dir = error_dir or get_specified_dir(original_dir, "error")
 
-    message = [
-        ["原图目录: ", original_dir],
-        ["临时目录: ", temp_dir],
-        ["错误目录: ", error_dir],
-        ["完成目录: ", target_dir],
-        ["开始Y: ", start_y],
-        ["截止Y: ", end_y],
-        ["分解量: ", interval],
-    ]
-    for name in message:
-        print(name[0], name[1], sep="")
-
     # 根目录处理
     asscess_dir(target_dir)
     asscess_dir(temp_dir)
@@ -575,6 +568,28 @@ def legao_main(original_dir="",
         "temp_dir": temp_dir,
         "error_dir": error_dir
     }
+
+    # 赋全局值
+    for prop in g_conf:
+        if not g_conf[prop]:
+            g_conf[prop] = config[prop]
+
+    modeName = "全部保留"
+    if splitMode == "full":
+        modeName = "仅保留完整的零件"
+
+    message = [
+        ["原图目录: ", original_dir],
+        ["临时目录: ", temp_dir],
+        ["错误目录: ", error_dir],
+        ["完成目录: ", target_dir],
+        ["图片截取Y: ", start_y],
+        ["图片截止Y: ", end_y],
+        ["分解量: ", interval],
+        ["切割模式: ", modeName],
+    ]
+    for name in message:
+        print(name[0], name[1], sep="")
 
     #开始任务
     exec_process_image(0, original_image_total_files, g_conf)
