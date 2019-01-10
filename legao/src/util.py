@@ -42,8 +42,6 @@ def clear_dir(dir_name):
             os.remove(path_to_remove)
 
 
-
-
 #  target目录
 def asscess_dir(target_dir):
     if os.path.exists(target_dir):

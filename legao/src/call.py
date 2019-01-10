@@ -7,6 +7,9 @@ def prepare():
         target_dir=config["target_dir"],
         error_dir=config["error_dir"],
         start_y=config["start_y"],
+        resize=config["resize"],
+        collectData=config["collectData"],
+        splitMode=config["splitMode"],
         interval=config["interval"],
         end_y=config["end_y"])
 

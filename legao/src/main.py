@@ -266,7 +266,8 @@ def get_out_dir_name(img_file, target_dir):
 
 
 # 切割部件
-def split_parts_for_image(start_y,preproces_path, out_dir, dir_name, original_dir):
+def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
+                          original_dir, collectData, splitMode):
     try:
 
         # 第三步图片
@@ -276,9 +277,12 @@ def split_parts_for_image(start_y,preproces_path, out_dir, dir_name, original_di
         original_img = cv2.imread(
             get_specified_dir(original_dir, dir_name + ".jpg"))
 
+        # 原图宽度
+        original_width = original_img.shape[1]
+
         width = segmented_img.shape[1]
         height = segmented_img.shape[0]
-   
+
         #定义区域
         min_area = 10
         max_area = width * height / 2
@@ -289,6 +293,10 @@ def split_parts_for_image(start_y,preproces_path, out_dir, dir_name, original_di
 
         # 部件图
         partImages = []
+
+        # 边缘部件
+        part_remove_left = 0
+        part_remove_right = 0
 
         while True:
             nz = np.nonzero(mask.flatten())[0].flatten()
@@ -318,13 +326,26 @@ def split_parts_for_image(start_y,preproces_path, out_dir, dir_name, original_di
                 # slicing into found rect
                 roi_mask = ff_mask[y + 1:y + 1 + h, x + 1:x + 1 + w]
                 found = False
-    
+
                 if min_area < area < max_area:
                     found_mask = roi_mask
                     newX = x * 4
                     newY = (y * 4) + start_y
                     newW = w * 4
                     newH = h * 4
+
+                    # 边界模式，跳出循环
+                    if splitMode == "full":
+                        if newX <= 0:
+                            found_mask = None
+                            found = True
+                            part_remove_left += 1
+
+                        if newW + newX >= original_width:
+                            found_mask = None
+                            found = True
+                            part_remove_right += 1
+
                     found_image = original_img[newY:newY + newH, newX:newX +
                                                newW].copy()
                     found = True
@@ -352,6 +373,17 @@ def split_parts_for_image(start_y,preproces_path, out_dir, dir_name, original_di
         else:
             create_dir(out_dir)
 
+        # 分割信息
+        if part_remove_left or part_remove_right:
+            fl = open(out_dir + "/data.json", 'w')
+            r_data = {
+                "left_remove": part_remove_left,
+                "right_remove": part_remove_right
+            }
+            fl.write(json.dumps(r_data, ensure_ascii=False, indent=2))
+            fl.close()
+
+        # 输出第二部分
         part_index = 0
         for part in partImages:
             title = os.path.splitext(os.path.split(preproces_path)[1])[0]
@@ -362,23 +394,27 @@ def split_parts_for_image(start_y,preproces_path, out_dir, dir_name, original_di
             # else:
             #     out_file = os.path.join(out_dir, "%s.png" % (title))
             cv2.imwrite(out_file, part)
-            color_thief = ColorThief(out_file)
-            dominant_color = color_thief.get_color(quality=1)
-            h, w = part.shape[:2]
-            datas = {
-                "name": file_name,
-                "w": w,
-                "h": h,
-                "area": w * h,
-                "rgb": dominant_color
-            }
-            filePath = out_dir + "/data.json"
-            if (os.path.exists(filePath)):
-                fl = open(filePath, 'a')
-            else:
-                fl = open(filePath, 'w')
-            fl.write(json.dumps(datas, ensure_ascii=False, indent=2))
-            fl.close()
+
+            # 支持数据采集
+            if collectData:
+                color_thief = ColorThief(out_file)
+                dominant_color = color_thief.get_color(quality=1)
+                h, w = part.shape[:2]
+                datas = {
+                    "name": file_name,
+                    "w": w,
+                    "h": h,
+                    "area": w * h,
+                    "rgb": dominant_color
+                }
+                filePath = out_dir + "/data.json"
+                if (os.path.exists(filePath)):
+                    fl = open(filePath, 'a')
+                else:
+                    fl = open(filePath, 'w')
+                fl.write(json.dumps(datas, ensure_ascii=False, indent=2))
+                fl.close()
+
             part_index += 1
 
         return dir_name + ".png", True
@@ -386,15 +422,23 @@ def split_parts_for_image(start_y,preproces_path, out_dir, dir_name, original_di
         return dir_name + ".png", False
 
 
-def split_parts(pool, preproces_dir, target_dir, original_dir, error_dir, start_y):
+def split_parts(pool, preproces_dir, g_conf):
+
+    target_dir = g_conf["target_dir"]
+    original_dir = g_conf["original_dir"]
+    error_dir = g_conf["error_dir"]
+    start_y = g_conf["start_y"]
+    collectData = g_conf["collectData"]
+    splitMode = g_conf["splitMode"]
+
     preproces_files = get_image_paths_from_dir(preproces_dir, 'png')
     futures = []
     for preproces_path in preproces_files:
         out_dir, dir_name = get_out_dir_name(preproces_path, target_dir)
         futures.append(
-            pool.apply_async(
-                split_parts_for_image,
-                (start_y,preproces_path, out_dir, dir_name, original_dir)))
+            pool.apply_async(split_parts_for_image,
+                             (start_y, preproces_path, out_dir, dir_name,
+                              original_dir, collectData, splitMode)))
 
     for future in futures:
         name, success = future.get()
@@ -409,20 +453,25 @@ def split_parts(pool, preproces_dir, target_dir, original_dir, error_dir, start_
 
 
 # 开始执行任务
-def exec_pool_task(start_y, end_y,futures, original_dir, temp_dir, target_dir, error_dir):
+def exec_pool_task(futures, g_conf):
     pool = Pool(4)
+    temp_dir = g_conf["temp_dir"]
+
     # 预处理
-    preproces_dir = preprocessImage(pool, futures, temp_dir, start_y, end_y)
-    # #生成mask图
+    preproces_dir = preprocessImage(pool, futures, g_conf)
+    # # #生成mask图
     mask_dir = generate_default_masks(pool, preproces_dir, temp_dir)
-    #分离前景与背景
+    # #分离前景与背景
     seg_dir = segment_images(pool, preproces_dir, mask_dir, temp_dir)
-    #分割部件
-    split_parts(pool, preproces_dir, target_dir, original_dir, error_dir, start_y)
+    # 分割部件
+    split_parts(pool, preproces_dir, g_conf)
 
 
-def exec_process_image(start_y, end_y, startCount, interval, image_total_files,
-                       original_dir, temp_dir, error_dir, target_dir):
+def exec_process_image(startCount, image_total_files, g_conf):
+
+    interval = g_conf["interval"]
+    temp_dir = g_conf["temp_dir"]
+
     futures = []
 
     # 图片总数量
@@ -447,30 +496,32 @@ def exec_process_image(start_y, end_y, startCount, interval, image_total_files,
     if total_images < endCount + 1:
         showEnd = startCount + (total_images - startCount)
 
-    print("共计", total_images, "张图, 开始分解图", startCount + 1, "到", showEnd, sep='')
+    print(
+        "共计", total_images, "张图, 开始分解图", startCount + 1, "到", showEnd, sep='')
 
     for index, value in enumerate(image_total_files):
         if index >= startCount and index <= endCount:
             img = image_total_files[index]
             futures.append(img)
 
-    exec_pool_task(start_y, end_y,futures, original_dir, temp_dir, target_dir, error_dir)
+    exec_pool_task(futures, g_conf)
 
     print("===============================")
 
     # 检测下一个任务
     asscess_dir(temp_dir)
-    exec_process_image(start_y, end_y, endCount + 1, interval,
-                       image_total_files, original_dir, temp_dir, error_dir,
-                       target_dir)
+    exec_process_image(endCount + 1, image_total_files, g_conf)
 
 
 # 执行入口
 def legao_main(original_dir="",
                target_dir="",
-               interval=20,
+               interval="",
                error_dir="",
                start_y="",
+               collectData="",
+               splitMode="",
+               resize="",
                end_y=""):
 
     if original_dir == "":
@@ -512,9 +563,21 @@ def legao_main(original_dir="",
 
     original_image_total_files = get_image_paths_from_dir(original_dir, 'jpg')
 
+    g_conf = {
+        "collectData": collectData,
+        "splitMode": splitMode,
+        "interval": interval,
+        "resize": resize,
+        "start_y": start_y,
+        "end_y": end_y,
+        "original_dir": original_dir,
+        "target_dir": target_dir,
+        "temp_dir": temp_dir,
+        "error_dir": error_dir
+    }
+
     #开始任务
-    exec_process_image(start_y, end_y, 0, interval, original_image_total_files,
-                       original_dir, temp_dir, error_dir, target_dir)
+    exec_process_image(0, original_image_total_files, g_conf)
 
 
 def prepare():
@@ -523,6 +586,9 @@ def prepare():
         target_dir=config["target_dir"],
         error_dir=config["error_dir"],
         start_y=config["start_y"],
+        resize=config["resize"],
+        collectData=config["collectData"],
+        splitMode=config["splitMode"],
         interval=config["interval"],
         end_y=config["end_y"])
 

@@ -21,15 +21,13 @@ def resize_to_resolution(im, preproces_size):
 def clipImage(path, start_y, end_y):
     img = cv2.imread(path)
     h, w = img.shape[:2]
-    setH = end_y
-    setH = h
-    img = img[start_y:setH, 0:w]
+    img = img[start_y:end_y, 0:w]
     return img
 
 
-def preprocess_image(path, temp_dir, start_y, end_y):
+def preprocess_image(path, temp_dir, start_y, end_y, resize):
     img = clipImage(path, start_y, end_y)
-    img_small = resize_to_resolution(img, 1024)
+    img_small = resize_to_resolution(img, resize)
     return img_small, path
 
 
@@ -40,14 +38,20 @@ def get_preprocess_img_name(img_file):
 
 
 #预处理 缩放图
-def preprocessImage(pool, image_files, temp_dir, start_y, end_y):
+def preprocessImage(pool, image_files, g_conf):
     futures = []
+
+    temp_dir = g_conf["temp_dir"]
+    start_y = g_conf["start_y"]
+    end_y = g_conf["end_y"]
+    resize = g_conf["resize"]
+
     preproces_dir = create_specified_dir(temp_dir, "1_preprocess")
 
     for path in image_files:
         futures.append(
             pool.apply_async(preprocess_image,
-                             (path, temp_dir, start_y, end_y)))
+                             (path, temp_dir, start_y, end_y, resize)))
 
     imageObjs = []
     for future in futures:
