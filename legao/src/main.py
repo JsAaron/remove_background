@@ -64,6 +64,41 @@ def get_mask_file_name(img_file):
     return os.path.join(masks_dir, png_name)
 
 
+#粗略的调节对比度和亮度
+def contrast_brightness_image(src1, a, g):
+    h, w, ch = src1.shape
+    src2 = np.zeros([h, w, ch], src1.dtype)
+    dst = cv2.addWeighted(src1, a, src2, 1-a, g)
+    return dst
+
+
+def on_canny(rgb,keyNmae):
+    mix = cv2.getTrackbarPos("mix",keyNmae)
+    max = cv2.getTrackbarPos("max",keyNmae)
+
+    split = cv2.split(rgb)
+    # Bule ，返回来一个给定形状和类型的用0填充的数组
+    acc = np.zeros(split[0].shape, dtype=np.float32)
+    # b,g,r
+    for img in split:
+        # 边缘检测,img 单通道灰度图.找到3种灰度对应的边缘
+        # detected_edges = cv2.GaussianBlur(img,(3,3),0)
+        blur = cv2.GaussianBlur(img, (3, 3), 0)
+        # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
+        # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
+        edges = cv2.Canny(blur, mix, max)
+        acc += edges
+
+    cv2.imshow(keyNmae, acc) 
+
+
+def on_mask(distances,maskName):
+    mix = cv2.getTrackbarPos("mix",maskName)
+    max = cv2.getTrackbarPos("max",maskName)
+    bg_mask = cv2.threshold(distances,mix, max,cv2.THRESH_BINARY)[1].astype(np.uint8)
+    cv2.imshow(maskName, bg_mask)
+
+
 # img_file 原图
 # mask_dst_file 保存目标图
 # preproces_path, mask_path
@@ -73,6 +108,21 @@ def create_default_mask(preproces_path, mask_path):
     mask_title = os.path.splitext(mask_filename)[0]
     # 找到downsampled 第一步处理的图片
     rgb = cv2.imread(get_preprocess_img_name(preproces_path))
+    rgb = contrast_brightness_image(rgb, 1.5, 20)
+
+    # keyNmae = "set-canny"
+    # cv2.namedWindow(keyNmae)
+    # cv2.createTrackbar("max",keyNmae,0,255,on_canny)
+    # cv2.createTrackbar("mix",keyNmae,0,255,on_canny)
+
+    # while(1):
+    #     on_canny(rgb,keyNmae)
+    #     k = cv2.waitKey(1)&0xFF
+    #     if k == 27:
+    #         break
+    # cv2.destroyAllWindows()
+
+
     split = cv2.split(rgb)
     # Bule ，返回来一个给定形状和类型的用0填充的数组
     acc = np.zeros(split[0].shape, dtype=np.float32)
@@ -81,58 +131,47 @@ def create_default_mask(preproces_path, mask_path):
     for img in split:
         # 边缘检测,img 单通道灰度图.找到3种灰度对应的边缘
         # detected_edges = cv2.GaussianBlur(img,(3,3),0)
-        blur = cv2.GaussianBlur(img, (3, 3), 0)
+        blur = cv2.GaussianBlur(img, (5, 5), 0)
         # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
         # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
-        edges = cv2.Canny(blur, 127, 255)
+        edges = cv2.Canny(blur, 35, 92)
         acc += edges
-
-    showImage(acc)
 
 
     # 数组的数值被平移或缩放到一个指定的范围，线性归一化
     cv2.normalize(acc, acc, 255, 0, cv2.NORM_MINMAX)
 
     # 阈值处理
-    acc = cv2.threshold(acc, 30, 255, cv2.THRESH_BINARY)[1]
+    acc = cv2.threshold(acc, 127, 255, cv2.THRESH_BINARY)[1]
 
-
-    if isDebug:
-        edge_file = os.path.join(mask_dir, mask_title + "_edge.png")
-        cv2.imwrite(edge_file, acc)
-
-    # 探测空区域
+    # 反转颜色
     edges = (255 - acc).astype(np.uint8)
+
     # 计算2值图象中所有像素离其最近的值为0像素的近似距离
     # src为输入的二值图像。distanceType为计算距离的方式，可以是如下值
-    # DIST_USER    = ⑴,  //!< User defined distance
-    # DIST_L1      = 1,   //!< distance = |x1-x2| + |y1-y2|
-    # DIST_L2      = 2,   //!< the simple euclidean distance
-    # DIST_C       = 3,   //!< distance = max(|x1-x2|,|y1-y2|)
-    # DIST_L12     = 4,   //!< L1-L2 metric: distance = 2(sqrt(1+x*x/2) - 1))
-    # DIST_FAIR    = 5,   //!< distance = c^2(|x|/c-log(1+|x|/c)), c = 1.3998
-    # DIST_WELSCH  = 6,   //!< distance = c^2/2(1-exp(-(x/c)^2)), c = 2.9846
-    # DIST_HUBER   = 7    //!< distance = |x|<c ? x^2/2 : c(|x|-c/2), c=1.345
-    # maskSize是蒙板尺寸，只有0,3,5
-    # DIST_MASK_3       = 3, //!< mask=3
-    # DIST_MASK_5       = 5, //!< mask=5
-    # DIST_MASK_PRECISE = 0  //!< mask=0
     distances = cv2.distanceTransform(edges, cv2.DIST_L2, 5)
-    bg_mask = cv2.threshold(distances, 60, 255,
-                            cv2.THRESH_BINARY)[1].astype(np.uint8)
+
+
+    # maskName = "set-mask"
+    # cv2.namedWindow(maskName)
+    # cv2.createTrackbar("max",maskName,0,255,on_mask)
+    # cv2.createTrackbar("mix",maskName,0,255,on_mask)
+
+    # while(1):
+    #     on_mask(distances,maskName)
+    #     k = cv2.waitKey(1)&0xFF
+    #     if k == 27:
+    #         break
+    # cv2.destroyAllWindows()
+
+
+    bg_mask = cv2.threshold(distances,30, 255,cv2.THRESH_BINARY)[1].astype(np.uint8)
 
     cv2.normalize(distances, distances, 255, 0, cv2.NORM_MINMAX)
 
-    if isDebug:
-        dist_file = os.path.join(mask_dir, mask_title + "_dist.png")
-        cv2.imwrite(dist_file, distances)
 
     bg_image = rgb.copy()
     bg_image[bg_mask != 0] = 0
-    if isDebug:
-        bg_mask_file = os.path.join(mask_dir, mask_title + "_bgmask.png")
-        cv2.imwrite(bg_mask_file, bg_image)
-
     ffmask = np.zeros((rgb.shape[0] + 2, rgb.shape[1] + 2), dtype=np.uint8)
     seed_points = np.column_stack(np.where(bg_mask != 0))
     np.random.shuffle(seed_points)
@@ -514,8 +553,8 @@ def exec_process_image(startCount, image_total_files, g_conf):
     print("===============================")
 
     # 检测下一个任务
-    asscess_dir(temp_dir)
-    exec_process_image(endCount + 1, image_total_files, g_conf)
+    # asscess_dir(temp_dir)
+    # exec_process_image(endCount + 1, image_total_files, g_conf)
 
 
 # 执行入口
@@ -583,8 +622,8 @@ def legao_main(original_dir="",
         ["临时目录: ", temp_dir],
         ["错误目录: ", error_dir],
         ["完成目录: ", target_dir],
-        ["图片截取Y: ", start_y],
-        ["图片截止Y: ", end_y],
+        ["原图截取从Y: ", start_y],
+        ["原图截止至Y: ", end_y],
         ["分解量: ", interval],
         ["切割模式: ", modeName],
     ]
