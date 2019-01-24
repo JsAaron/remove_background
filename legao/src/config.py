@@ -20,7 +20,7 @@ config = {
     #图片切割的Y轴结束
     "end_y": 2000,
     # 需要处理的图片目录
-    "original_dir": os.path.join(root_path, 'test'),
+    "original_dir": os.path.join(root_path, 'original'),
     # 处理后的目录位置
     "target_dir": os.path.join(root_path, 'target'),
     #可选（图片错误保存目录(如不填，默认放到original_dir内部)

@@ -72,9 +72,9 @@ def contrast_brightness_image(src1, a, g):
     return dst
 
 
-def on_canny(rgb,keyNmae):
-    mix = cv2.getTrackbarPos("mix",keyNmae)
-    max = cv2.getTrackbarPos("max",keyNmae)
+def on_canny(rgb,keyNmae,mix,max):
+    mix = cv2.getTrackbarPos("mix",keyNmae) or mix
+    max =  cv2.getTrackbarPos("max",keyNmae) or max
 
     split = cv2.split(rgb)
     # Bule ，返回来一个给定形状和类型的用0填充的数组
@@ -83,7 +83,7 @@ def on_canny(rgb,keyNmae):
     for img in split:
         # 边缘检测,img 单通道灰度图.找到3种灰度对应的边缘
         # detected_edges = cv2.GaussianBlur(img,(3,3),0)
-        blur = cv2.GaussianBlur(img, (3, 3), 0)
+        blur = cv2.GaussianBlur(img, (5, 5), 0)
         # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
         # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
         edges = cv2.Canny(blur, mix, max)
@@ -116,7 +116,7 @@ def create_default_mask(preproces_path, mask_path):
     # cv2.createTrackbar("mix",keyNmae,0,255,on_canny)
 
     # while(1):
-    #     on_canny(rgb,keyNmae)
+    #     on_canny(rgb,keyNmae,35,92)
     #     k = cv2.waitKey(1)&0xFF
     #     if k == 27:
     #         break
@@ -134,7 +134,7 @@ def create_default_mask(preproces_path, mask_path):
         blur = cv2.GaussianBlur(img, (5, 5), 0)
         # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
         # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
-        edges = cv2.Canny(blur, 35, 92)
+        edges = cv2.Canny(blur, 40, 100)
         acc += edges
 
 
@@ -169,9 +169,9 @@ def create_default_mask(preproces_path, mask_path):
 
     cv2.normalize(distances, distances, 255, 0, cv2.NORM_MINMAX)
 
-
     bg_image = rgb.copy()
     bg_image[bg_mask != 0] = 0
+
     ffmask = np.zeros((rgb.shape[0] + 2, rgb.shape[1] + 2), dtype=np.uint8)
     seed_points = np.column_stack(np.where(bg_mask != 0))
     np.random.shuffle(seed_points)
@@ -328,7 +328,7 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
         height = segmented_img.shape[0]
 
         #定义区域
-        min_area = 10
+        min_area = 50
         max_area = width * height / 2
 
         # BGR=>灰度图
