@@ -134,7 +134,7 @@ def create_default_mask(preproces_path, mask_path):
         blur = cv2.GaussianBlur(img, (5, 5), 0)
         # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
         # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
-        edges = cv2.Canny(blur, 40, 100)
+        edges = cv2.Canny(blur, 35, 90)
         acc += edges
 
 
@@ -164,25 +164,36 @@ def create_default_mask(preproces_path, mask_path):
     #         break
     # cv2.destroyAllWindows()
 
-
+    # cv2.normalize(distances, distances, 255, 0, cv2.NORM_MINMAX)
     bg_mask = cv2.threshold(distances,30, 255,cv2.THRESH_BINARY)[1].astype(np.uint8)
 
-    cv2.normalize(distances, distances, 255, 0, cv2.NORM_MINMAX)
-
     bg_image = rgb.copy()
+    # 白色的地方转成黑色
     bg_image[bg_mask != 0] = 0
 
+    # 掩码图像,大小比原图多两个像素点
     ffmask = np.zeros((rgb.shape[0] + 2, rgb.shape[1] + 2), dtype=np.uint8)
+
     seed_points = np.column_stack(np.where(bg_mask != 0))
     np.random.shuffle(seed_points)
+    
     seed = seed_points[0]
+
     width = rgb.shape[1]
     height = rgb.shape[0]
-    for it in range(10):
+
+    # showImage(bg_mask)
+
+    for it in range(5):
+        # 颜色替换
         area, _, _, rect = cv2.floodFill(
             rgb,
-            ffmask, (seed[1], seed[0]),
+            ffmask, 
+            # 其实填充标记点 
+            (seed[1], seed[0]), 
+            # 填充值 
             255,
+            # 为像素值的下限差值
             loDiff=(4, 4, 4, 4),
             upDiff=(4, 4, 4, 4),
             flags=(4 | (255 << 8) | cv2.FLOODFILL_MASK_ONLY))
@@ -196,7 +207,6 @@ def create_default_mask(preproces_path, mask_path):
         seed = seed_points[0]
 
     bg_mask = shrink_mask(bg_mask, 3, 1)
-
     bg_image = rgb.copy()
     bg_image[bg_mask != 0] = 0
     cv2.imwrite(mask_path, bg_image)
@@ -255,6 +265,7 @@ def create_segmentation(mask_path, seg_file):
         mask[mask_img == 0] = cv2.GC_BGD
         mask[mask_img == 255] = cv2.GC_FGD
 
+
         bgdModel = np.zeros((1, 65), np.float64)
         fgdModel = np.zeros((1, 65), np.float64)
 
@@ -268,6 +279,7 @@ def create_segmentation(mask_path, seg_file):
 
         # #0和2做背景
         mask2 = np.where((mask == 2) | (mask == 0), 0, 1).astype('uint8')
+
         # 使用蒙板来获取前景区域
         segmented = cut_img * mask2[:, :, np.newaxis]
 
@@ -323,13 +335,14 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
 
         # 原图宽度
         original_width = original_img.shape[1]
+        original_resize = original_width / 1000
 
         width = segmented_img.shape[1]
         height = segmented_img.shape[0]
 
         #定义区域
         min_area = 50
-        max_area = width * height / 2
+        max_area = width * height 
 
         # BGR=>灰度图
         mask = cv2.cvtColor((segmented_img != 0).astype(np.uint8),
@@ -343,6 +356,8 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
         part_remove_right = 0
 
         while True:
+            # 将mask转化为1维数组
+            # 返回数组mask中值不为零的元素的下标,
             nz = np.nonzero(mask.flatten())[0].flatten()
             if len(nz) == 0:
                 break
@@ -353,12 +368,13 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
             while True:
                 index = nz[nz_i]
                 seed_x = index % width
-                seed_y = index // width
-
+                # 向下取整
+                seed_y = index // width 
                 ff_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
                 area, _, __, rect = cv2.floodFill(
                     mask,
-                    ff_mask, (seed_x, seed_y),
+                    ff_mask,
+                    (seed_x, seed_y),
                     255,
                     flags=cv2.FLOODFILL_MASK_ONLY | cv2.FLOODFILL_FIXED_RANGE)
 
@@ -382,16 +398,19 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                     if splitMode == "full":
                         if newX <= 0:
                             found_mask = None
-                            found = True
                             part_remove_left += 1
 
                         if newW + newX >= original_width:
                             found_mask = None
-                            found = True
                             part_remove_right += 1
 
-                    found_image = original_img[newY:newY + newH, newX:newX +
-                                               newW].copy()
+                    startX = newX - 30
+                    endX = newX + newW + 30
+
+                    startY = newY - 30
+                    endY = newY + newH + 30
+        
+                    found_image = original_img[startY:endY, startX:endX].copy()
                     found = True
 
                 # clearing found component in the mask
