@@ -89,7 +89,7 @@ def on_canny(rgb,keyNmae,mix,max):
     for img in split:
         # 边缘检测,img 单通道灰度图.找到3种灰度对应的边缘
         # detected_edges = cv2.GaussianBlur(img,(3,3),0)
-        blur = cv2.GaussianBlur(img, (5, 5), 0)
+        blur = cv2.GaussianBlur(img, (3, 3), 0)
         # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
         # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
         edges = cv2.Canny(blur, mix, max)
@@ -140,7 +140,7 @@ def create_default_mask(preproces_path, mask_path):
         blur = cv2.GaussianBlur(img, (5, 5), 0)
         # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
         # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
-        edges = cv2.Canny(blur, 35, 90)
+        edges = cv2.Canny(blur, 60, 120)
         acc += edges
 
 
@@ -361,6 +361,8 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
         part_remove_left = 0
         part_remove_right = 0
 
+        newimage=original_img.copy()
+
         while True:
             # 将mask转化为1维数组
             # 返回数组mask中值不为零的元素的下标,
@@ -428,11 +430,11 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                         left_top_x,left_top_y = pox[0]
                         left_bottom_x,left_bottom_y = pox[1]
                         # 计算在图中真实坐标
-                        left_top_x += startX -60
-                        left_top_y += startY -60
-                        left_bottom_x += startX -60
-                        left_bottom_y += startY -60
-                        print(dir_name,left_top_x,left_top_y,left_bottom_x,left_bottom_y)
+                        left_top_x += startX 
+                        left_top_y += startY 
+                        left_bottom_x += startX 
+                        left_bottom_y += startY 
+                        cv2.line(newimage,(left_bottom_x,left_bottom_y),(left_top_x,left_top_y),(0,0,255),10)
 
 
                 # clearing found component in the mask
@@ -447,6 +449,12 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
 
             if found_mask is not None:
                 partImages.append(found_image)
+
+
+        # 输出线图
+        cv2.imwrite( os.path.join(out_dir,
+                                    "%s.png" % (dir_name)), newimage)
+
 
         # 如果有多个零件，创建目录保存
         # hasmorepart = len(partImages) > 1
