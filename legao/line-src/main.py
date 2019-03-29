@@ -1,7 +1,6 @@
 import argparse
 import os
 from os import path
-import cv2
 import numpy as np
 import random
 from multiprocessing import Pool
@@ -10,6 +9,13 @@ from PIL import Image, ImageTk
 import json
 import shutil
 import copy
+
+
+import cv2
+import matplotlib.pyplot as plt
+import imutils
+from imutils.perspective import four_point_transform
+
 
 from color import ColorThief
 from config import config
@@ -335,6 +341,7 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
 
         # 原图宽度
         original_width = original_img.shape[1]
+        original_resize = original_width / 1000
 
         width = segmented_img.shape[1]
         height = segmented_img.shape[0]
@@ -355,6 +362,8 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
         part_remove_right = 0
 
         while True:
+            # 将mask转化为1维数组
+            # 返回数组mask中值不为零的元素的下标,
             nz = np.nonzero(mask.flatten())[0].flatten()
             if len(nz) == 0:
                 break
@@ -365,8 +374,8 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
             while True:
                 index = nz[nz_i]
                 seed_x = index % width
-                seed_y = index // width
-
+                # 向下取整
+                seed_y = index // width 
                 ff_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
                 area, _, __, rect = cv2.floodFill(
                     mask,
@@ -379,6 +388,7 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                 y = rect[1]
                 w = rect[2]
                 h = rect[3]
+
 
                 # slicing into found rect
                 roi_mask = ff_mask[y + 1:y + 1 + h, x + 1:x + 1 + w]
@@ -401,8 +411,29 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                             found_mask = None
                             part_remove_right += 1
 
-                    found_image = original_img[newY:newY + newH, newX:newX +newW].copy()
+                    startX = newX - 30
+                    endX = newX + newW + 30
+
+                    startY = newY - 30
+                    endY = newY + newH + 30
+        
+                    found_image = original_img[startY:endY, startX:endX].copy()
                     found = True
+
+                    # 数字下标
+                    if newW<300 and newH<160 and newY>1800:
+                        out_file = os.path.join(out_dir, "%s.png" % (newX))
+                        cv2.imwrite(out_file, found_image)
+                        pox = preproces_line(out_file,os.path.join(out_dir, "%s.line.png" % (newX)))
+                        left_top_x,left_top_y = pox[0]
+                        left_bottom_x,left_bottom_y = pox[1]
+                        # 计算在图中真实坐标
+                        left_top_x += startX -60
+                        left_top_y += startY -60
+                        left_bottom_x += startX -60
+                        left_bottom_y += startY -60
+                        print(dir_name,left_top_x,left_top_y,left_bottom_x,left_bottom_y)
+
 
                 # clearing found component in the mask
                 mask[y:y + h, x:x + w][roi_mask != 0] = 0
@@ -657,5 +688,78 @@ def prepare():
         end_y=config["end_y"])
 
 
+
+def preproces_line(out_file,new_file):
+    image = cv2.imread(out_file)
+    #转换为灰度图像
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    #高斯滤波
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    #自适应二值化方法
+    blurred=cv2.adaptiveThreshold(blurred,255,cv2.ADAPTIVE_THRESH_MEAN_C,cv2.THRESH_BINARY,51,2)
+    blurred=cv2.copyMakeBorder(blurred,5,5,5,5,cv2.BORDER_CONSTANT,value=(255,255,255))
+    edged = cv2.Canny(blurred, 50, 100)     
+    cnts = cv2.findContours(edged, cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    cnts = cnts[0] if imutils.is_cv2() else cnts[1]
+
+    docCnt = None
+    # 确保至少有一个轮廓被找到
+    if len(cnts) > 0:
+        # 将轮廓按大小降序排序
+        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+        # 对排序后的轮廓循环处理
+        for c in cnts:
+            # 获取近似的轮廓
+            peri = cv2.arcLength(c, True)
+            approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+            # 如果近似轮廓有四个顶点，那么就认为找到了
+            if len(approx) == 4:
+                docCnt = approx
+                break
+
+    newimage=image.copy()
+    for i in docCnt:
+        #circle函数为在图像上作图，新建了一个图像用来演示四角选取  b,g,r
+        cv2.circle(newimage, (i[0][0],i[0][1]), 0, (240 ,32, 160), -1)
+
+    cv2.imwrite(new_file, newimage)
+
+    image_line = Image.open(new_file)
+    if image_line.mode != "RGBA":
+        image_line = image_line.convert('RGBA')
+    pix = image_line.load()
+    width, height = image_line.size
+
+    tempY = 0
+    dict_arr = []
+    for x in range(width):
+        for y in range(height):
+            r, g, b, a = pix[x, y]
+            if r==160 and g==32 and b == 240:
+                if len(dict_arr):
+                    if len(dict_arr)>1:
+                        return dict_arr
+                    if tempY<y:
+                        dict_arr.append([x,y])
+                    else:
+                        dict_arr.insert(0,[x,y]) 
+                    break
+                else:
+                    dict_arr.append([x,y])
+                    tempY = y
+
+
+
+    return
+
+
+
+# d:\project\github\remove_background\legao\target\2876.png
+# d:\project\github\remove_background\legao\target\1744.png
+
+
+
 if __name__ == "__main__":
     prepare()
+    # preproces_line("d:\\project\\github\\remove_background\\legao\\target\\1744.png","d:\\project\\github\\remove_background\\legao\\target\\1744.line.png")
+
