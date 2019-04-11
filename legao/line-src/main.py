@@ -361,6 +361,10 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
         part_remove_left = 0
         part_remove_right = 0
 
+        #参考点标签的坐标合计
+        labelPoint = []
+
+
         newimage=original_img.copy()
 
         while True:
@@ -391,11 +395,11 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                 w = rect[2]
                 h = rect[3]
 
-
                 # slicing into found rect
                 roi_mask = ff_mask[y + 1:y + 1 + h, x + 1:x + 1 + w]
                 found = False
 
+                # 找指定区域的内容
                 if min_area < area < max_area:
                     found_mask = roi_mask
                     newX = x * 4
@@ -413,12 +417,11 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                             found_mask = None
                             part_remove_right += 1
 
+                    # 扩散30px截取
                     startX = newX - 30
                     endX = newX + newW + 30
-
                     startY = newY - 30
                     endY = newY + newH + 30
-        
                     found_image = original_img[startY:endY, startX:endX].copy()
                     found = True
 
@@ -434,8 +437,19 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                         left_top_y += startY 
                         left_bottom_x += startX 
                         left_bottom_y += startY 
-                        cv2.line(newimage,(left_bottom_x,left_bottom_y),(left_top_x,left_top_y),(0,0,255),10)
 
+                        # 目标的X坐标
+                        targetX = getXValue((left_bottom_x, left_bottom_y), (left_top_x, left_top_y), 1050)
+                        labelPoint.append([left_bottom_x,left_bottom_y,int(targetX),0])
+
+                        cv2.line(newimage,(left_bottom_x,left_bottom_y),(left_top_x,left_top_y),(0,0,255),10)
+                        found_mask = None
+
+                    # 找到其余的元素
+                    if found_mask is not None:
+                      centerX = newX + newW/2
+                      centerY = newX + newW/2
+                      partImages.append([found_image,centerX,centerY])
 
                 # clearing found component in the mask
                 mask[y:y + h, x:x + w][roi_mask != 0] = 0
@@ -447,68 +461,12 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                 if nz_i >= len(nz):
                     break
 
-            if found_mask is not None:
-                partImages.append(found_image)
-
-
         # 输出线图
-        cv2.imwrite( os.path.join(out_dir,
-                                    "%s.png" % (dir_name)), newimage)
+        cv2.imwrite( os.path.join(out_dir, "%s.png" % (dir_name)), newimage)
 
-
-        # 如果有多个零件，创建目录保存
-        # hasmorepart = len(partImages) > 1
-        # if hasmorepart:
-        out_dir = get_specified_dir(out_dir, dir_name)
-
-        if os.path.exists(out_dir):
-            clear_dir(out_dir)
-        else:
-            create_dir(out_dir)
-
-        # 分割信息
-        if part_remove_left or part_remove_right:
-            fl = open(out_dir + "/data.json", 'w')
-            r_data = {
-                "left_remove": part_remove_left,
-                "right_remove": part_remove_right
-            }
-            fl.write(json.dumps(r_data, ensure_ascii=False, indent=2))
-            fl.close()
-
-        # 输出第二部分
-        part_index = 0
-        for part in partImages:
-            title = os.path.splitext(os.path.split(preproces_path)[1])[0]
-            file_name = os.path.join("", "%s_%02d.png" % (title, part_index))
-            # if hasmorepart:
-            out_file = os.path.join(out_dir,
-                                    "%s_%02d.png" % (title, part_index))
-            # else:
-            #     out_file = os.path.join(out_dir, "%s.png" % (title))
-            cv2.imwrite(out_file, part)
-
-            # 支持数据采集
-            if collectData:
-                color_thief = ColorThief(out_file)
-                dominant_color = color_thief.get_color(quality=1)
-                h, w = part.shape[:2]
-                datas = {
-                    "name": file_name,
-                    "w": w,
-                    "h": h,
-                    "area": w * h,
-                    "rgb": dominant_color
-                }
-                filePath = out_dir + "/data.json"
-                if (os.path.exists(filePath)):
-                    fl = open(filePath, 'a')
-                else:
-                    fl = open(filePath, 'w')
-                fl.write(json.dumps(datas, ensure_ascii=False, indent=2))
-                fl.close()
-
-            part_index += 1
+        # 获取交叉点坐标
+        crosslineDistance(partImages,labelPoint)
+   
 
         return dir_name + ".png", True
     except Exception as _:
@@ -755,9 +713,6 @@ def preproces_line(out_file,new_file):
                 else:
                     dict_arr.append([x,y])
                     tempY = y
-
-
-
     return
 
 
@@ -765,9 +720,65 @@ def preproces_line(out_file,new_file):
 # d:\project\github\remove_background\legao\target\2876.png
 # d:\project\github\remove_background\legao\target\1744.png
 
+def getXValue(p1, p2, y):
+    '''
+    p1和p2是两个点，y是另外一个点p3的Y坐标值；
+    p1,p2和p3在同一条直线上，返回点p3的X坐标值
+    p1=(x1,y1)  p2=(x2,y2)
+    y记得加上截取的值默认是1050
+    '''
+    k = (p2[1] - p1[1]) / (p2[0] - p1[0])
+    b = p2[1] - k * p2[0]
+    x = (y - b) / k
+    return x
+
+
+def cross_point(line1,line2):#计算交点函数
+    x1=line1[0]#取四点坐标
+    y1=line1[1]
+    x2=line1[2]
+    y2=line1[3]
+    
+    x3=line2[0]
+    y3=line2[1]
+    x4=line2[2]
+    y4=line2[3]
+    
+    k1=(y2-y1)*1.0/(x2-x1)#计算k1,由于点均为整数，需要进行浮点数转化
+    b1=y1*1.0-x1*k1*1.0#整型转浮点型是关键
+    if (x4-x3)==0:#L2直线斜率不存在操作
+        k2=None
+        b2=0
+    else:
+        k2=(y4-y3)*1.0/(x4-x3)#斜率存在操作
+        b2=y3*1.0-x3*k2*1.0
+    if k2==None:
+        x=x3
+    else:
+        x=(b2-b1)*1.0/(k1-k2)
+    y=k1*x*1.0+b1*1.0
+    return [x,y]
+
+
+# 计算元素中心位置，到交叉点的距离
+def crosslineDistance(partImages,labelPoint):
+    print(partImages,labelPoint)
+    # line1=[centerX,centerY,4000,centerY]
+    # line2=[tempPointX, tempPointY,1805,0]
+    # print(centerX,centerY,tempPointX,tempPointY)
+    # print(line1,line2)
+    # 交叉点坐标
+    # cross = cross_point(line1, line2)
+    # print(cross)
+    return  200
 
 
 if __name__ == "__main__":
     prepare()
+    # line1=[2034,1298,4098,1298]
+    # line2=[2879, 1984,1805,0]
+    # pos = cross_point(line1, line2)
+    # print(pos)
+
     # preproces_line("d:\\project\\github\\remove_background\\legao\\target\\1744.png","d:\\project\\github\\remove_background\\legao\\target\\1744.line.png")
 
