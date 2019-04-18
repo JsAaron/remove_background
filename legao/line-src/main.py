@@ -114,7 +114,9 @@ def create_default_mask(preproces_path, mask_path):
     mask_title = os.path.splitext(mask_filename)[0]
     # 找到downsampled 第一步处理的图片
     rgb = cv2.imread(get_preprocess_img_name(preproces_path))
-    rgb = contrast_brightness_image(rgb, 1.5, 20)
+    rgb = contrast_brightness_image(rgb, 1, 30)
+
+
 
     # keyNmae = "set-canny"
     # cv2.namedWindow(keyNmae)
@@ -129,6 +131,7 @@ def create_default_mask(preproces_path, mask_path):
     # cv2.destroyAllWindows()
 
 
+
     split = cv2.split(rgb)
     # Bule ，返回来一个给定形状和类型的用0填充的数组
     acc = np.zeros(split[0].shape, dtype=np.float32)
@@ -140,7 +143,7 @@ def create_default_mask(preproces_path, mask_path):
         blur = cv2.GaussianBlur(img, (5, 5), 0)
         # 图像灰度梯度 高于maxVal被认为是真正的边界，低于minVal的舍弃。
         # 两者之间的值要判断是否与真正的边界相连，相连就保留，不相连舍弃
-        edges = cv2.Canny(blur, 60, 120)
+        edges = cv2.Canny(blur, 23, 70)
         acc += edges
 
 
@@ -171,7 +174,7 @@ def create_default_mask(preproces_path, mask_path):
     # cv2.destroyAllWindows()
 
     # cv2.normalize(distances, distances, 255, 0, cv2.NORM_MINMAX)
-    bg_mask = cv2.threshold(distances,30, 255,cv2.THRESH_BINARY)[1].astype(np.uint8)
+    bg_mask = cv2.threshold(distances,20, 255,cv2.THRESH_BINARY)[1].astype(np.uint8)
 
     bg_image = rgb.copy()
     # 白色的地方转成黑色
@@ -425,8 +428,11 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                     found_image = original_img[startY:endY, startX:endX].copy()
                     found = True
 
+                    out_file = os.path.join(out_dir, "%s.png" % (newX))
+                    cv2.imwrite(out_file, found_image)
+
                     # 数字下标
-                    if newW<300 and newH<160 and newY>1800:
+                    if newW<400 and newH>100 and newH<200 and newY>1800:
                         out_file = os.path.join(out_dir, "%s.png" % (newX))
                         cv2.imwrite(out_file, found_image)
                         pox = preproces_line(out_file,os.path.join(out_dir, "%s.line.png" % (newX)))
@@ -440,16 +446,18 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
 
                         # 目标的X坐标
                         targetX = getXValue((left_bottom_x, left_bottom_y), (left_top_x, left_top_y), 1050)
-                        labelPoint.append([left_bottom_x,left_bottom_y,int(targetX),0])
+                        labelPoint.append([left_bottom_x,left_bottom_y,int(targetX),1050])
 
-                        cv2.line(newimage,(left_bottom_x,left_bottom_y),(left_top_x,left_top_y),(0,0,255),10)
+                        cv2.line(newimage,(left_bottom_x,left_bottom_y),(int(targetX),1050),(255,255,0),10)
                         found_mask = None
 
                     # 找到其余的元素
                     if found_mask is not None:
                       centerX = newX + newW/2
-                      centerY = newX + newW/2
-                      partImages.append([found_image,centerX,centerY])
+                      centerY = newY + newH/2
+                      partImages.append([int(centerX),int(centerY),found_image])
+                      out_file = os.path.join(out_dir, "%s.png" % (newX))
+                      cv2.imwrite(out_file, found_image)
 
                 # clearing found component in the mask
                 mask[y:y + h, x:x + w][roi_mask != 0] = 0
@@ -461,12 +469,13 @@ def split_parts_for_image(start_y, preproces_path, out_dir, dir_name,
                 if nz_i >= len(nz):
                     break
 
+
+        # 获取交叉点坐标
+        crosslineDistance(newimage,partImages,labelPoint)
+   
         # 输出线图
         cv2.imwrite( os.path.join(out_dir, "%s.png" % (dir_name)), newimage)
 
-        # 获取交叉点坐标
-        crosslineDistance(partImages,labelPoint)
-   
 
         return dir_name + ".png", True
     except Exception as _:
@@ -512,9 +521,9 @@ def exec_pool_task(futures, g_conf):
     preproces_dir = preprocessImage(pool, futures, g_conf)
     #生成mask图
     mask_dir = generate_default_masks(pool, preproces_dir, temp_dir)
-    #分离前景与背景
+    # #分离前景与背景
     seg_dir = segment_images(pool, preproces_dir, mask_dir, temp_dir)
-    # 分割部件
+    # # 分割部件
     split_parts(pool, preproces_dir, g_conf)
 
 
@@ -761,23 +770,51 @@ def cross_point(line1,line2):#计算交点函数
 
 
 # 计算元素中心位置，到交叉点的距离
-def crosslineDistance(partImages,labelPoint):
-    print(partImages,labelPoint)
-    # line1=[centerX,centerY,4000,centerY]
-    # line2=[tempPointX, tempPointY,1805,0]
-    # print(centerX,centerY,tempPointX,tempPointY)
-    # print(line1,line2)
-    # 交叉点坐标
-    # cross = cross_point(line1, line2)
-    # print(cross)
-    return  200
+def crosslineDistance(newimage,partImages,labelPoint):
+    for item in labelPoint:
+        x1,y1,x2,y2 = item
+        for part in partImages:
+            centerX,centerY,part = part
+            line1=[centerX,centerY,4096,centerY]
+            line2=[x1, y1,x2,y2]
+            # 交叉点坐标
+            cross = cross_point(line1, line2)
+            if centerX < int(cross[0]):
+               cv2.line(newimage,(centerX,centerY),(int(cross[0]),int(cross[1])),(0,255,255),3)
+        print(x1)
+
+    # for item in partImages:
+    #     centerX,centerY,part = item
+    #     line1=[centerX,centerY,4096,centerY]
+
+    #     # 第一个交叉点
+    #     x1,y1,x2,y2 = labelPoint[0]
+    #     line2=[x1, y1,x2,y2]
+    #     # 交叉点坐标
+    #     cross = cross_point(line1, line2)
+    #     if centerX < int(cross[0]):
+    #         cv2.line(newimage,(centerX,centerY),(int(cross[0]),int(cross[1])),(0,255,255),3)
+  
+    #     # 第一个交叉点
+    #     x3,y3,x4,y4 = labelPoint[1]
+    #     line2=[x3, y3,x4,y4]
+    #     # 交叉点坐标
+    #     cross = cross_point(line1, line2)
+    #     if centerX < int(cross[0]):
+    #         cv2.line(newimage,(centerX+10,centerY+10),(int(cross[0]),int(cross[1])),(0,0,255),3)
+  
+
+
+
+    return  
 
 
 if __name__ == "__main__":
     prepare()
     # line1=[2034,1298,4098,1298]
     # line2=[2879, 1984,1805,0]
-    # pos = cross_point(line1, line2)
+    # pos = cross_point(line1, line2).
+    
     # print(pos)
 
     # preproces_line("d:\\project\\github\\remove_background\\legao\\target\\1744.png","d:\\project\\github\\remove_background\\legao\\target\\1744.line.png")
